@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <signal.h>
 
 #include <string.h>
 #include <assert.h>
@@ -38,6 +39,8 @@
 FILE *gps_out, *gps_in;
 FILE *sout;
 
+sqlite3 *db;
+
 typedef struct {
     GLsizei len;
     GLfloat r, g, b;
@@ -51,10 +54,11 @@ unsigned int Indices_len;
 GLuint *Indices;
 
 int vert_len, tmp_vert_len, yama_len, tmp_yama_len, werder_len, tmp_werder_len;
-static GLfloat verts[10000] = {0.0f};
-static GLfloat tmp_verts[10000] = {0.0f};
-//GLfloat *tmp_verts;
-static GLfloat verts2[10000] = {0.0f};
+
+#define V_LEN 20000
+static GLfloat verts[V_LEN] = {0.0f};
+static GLfloat tmp_verts[V_LEN] = {0.0f};
+static GLfloat verts2[V_LEN] = {0.0f};
 
 void setPOS(ESContext *esContext);
 static int sqc_yama(void *NotUsed, int argc, char **argv, char **azColName);
@@ -88,7 +92,6 @@ pthread_mutex_t m_pinto = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
     // Handle to a program object
-    GLuint programObject;
     GLuint programObject2;
     GLuint programGUI;
     GLuint programKreis;
@@ -323,29 +326,6 @@ int load_tex_images(ESContext *esContext) {
 int Init(ESContext *esContext) {
     UserData *userData = esContext->userData;
 
-    const char *v1 = "uniform mat4 u_mvpMatrix; \n"
-            "uniform vec2 u_offset;             \n"
-            "attribute vec4 a_position;         \n"
-            "attribute vec2 a_texCoord;         \n"
-            "varying vec2 v_texCoord;           \n"
-            "void main()                        \n"
-            "{                                  \n"
-            "  gl_Position = a_position;        \n"
-            "  gl_Position.x -= u_offset.x;     \n"
-            "  gl_Position.y -= u_offset.y;     \n"
-            "  gl_Position  *= u_mvpMatrix;     \n"
-            "  gl_Position.y -= 0.3;            \n"
-            "  v_texCoord = a_texCoord;         \n"
-            "}                                  \n";
-
-    const char *f1 = "precision mediump float;                   \n"
-            "varying vec2 v_texCoord;                            \n"
-            "uniform sampler2D s_texture;                        \n"
-            "void main()                                         \n"
-            "{                                                   \n"
-            "  gl_FragColor = texture2D( s_texture, v_texCoord );\n"
-            "}                                                   \n";
-
     const char *v2 = "attribute vec4 a_position; \n"
             "attribute vec2 a_texCoord;          \n"
             "varying vec2 v_texCoord;            \n"
@@ -404,18 +384,9 @@ int Init(ESContext *esContext) {
             "}                                                      \n";
 
     // Load the shaders and get a linked program object
-    userData->programObject = esLoadProgram(v1, f1);
     userData->programGUI = esLoadProgram(v2, f2);
     userData->programKreis = esLoadProgram(v3, f3);
     userData->programObject2 = esLoadProgram(v4, f4);
-
-    // Get the attribute locations
-    userData->positionLoc = glGetAttribLocation(userData->programObject, "a_position");
-    userData->offsetLoc = glGetUniformLocation(userData->programObject, "u_offset");
-    userData->texCoordLoc = glGetAttribLocation(userData->programObject, "a_texCoord");
-    userData->texLoc = glGetUniformLocation(userData->programObject, "s_baseMap");
-    userData->mvpLoc = glGetUniformLocation(userData->programObject, "u_mvpMatrix");
-    userData->samplerLoc = glGetUniformLocation(userData->programObject, "s_texture");
 
     userData->positionLoc2 = glGetAttribLocation(userData->programGUI, "a_position");
     userData->texCoordLoc2 = glGetAttribLocation(userData->programGUI, "a_texCoord");
@@ -565,7 +536,7 @@ int Init(ESContext *esContext) {
      */
 
     glViewport(0, -160, 800, 800);
-
+ 
     return GL_TRUE;
 }
 
@@ -692,39 +663,44 @@ void Update2(ESContext *esContext, float deltaTime) {
     esMatrixMultiply(&mvpMatrix, &modelview, &perspective);
 #endif
 
-    //posData->v_x = sinf(posData->angle * rad2deg) * posData->v;
-    //posData->v_y = cosf(posData->angle * rad2deg) * posData->v;
+    posData->v_x = sinf(posData->angle * rad2deg) * posData->v;
+    posData->v_y = cosf(posData->angle * rad2deg) * posData->v;
 
-    //posData->g_x += deltaTime * posData->v_x / 3600.0f / posData->osmS;
-    //posData->g_y -= deltaTime * posData->v_y / 3600.0 / posData->osmS;
+    posData->g_x += deltaTime * posData->v_x / 3600.0f / posData->osmS;
+    posData->g_y -= deltaTime * posData->v_y / 3600.0 / posData->osmS;
 
     // DRAW
+
     glClear(GL_COLOR_BUFFER_BIT);
 
     glUseProgram(userData->programObject2);
 
+
     for (m_n = 0; m_n < 3 * vert_len; m_n += 3) {
-        verts2[m_n] = verts[m_n] - posData->g_x;
-        verts2[m_n + 1] = posData->g_y - verts[m_n + 1];
-        //printf("%i: %f  %f  %f\n", m_n,verts2[m_n], verts2[m_n+1], verts2[m_n+2]);
+        //verts2[m_n] = verts[m_n] - posData->g_x;
+        verts2[m_n] = 0.0f;
+        //verts2[m_n + 1] = posData->g_y - verts[m_n + 1];
+        verts2[m_n + 1] = 0.0f;
+        verts2[m_n + 2] = 0.0f;
     }
 
     glUniformMatrix4fv(userData->mvpLoc3, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
-    glUniform2f(userData->offsetLoc3, (float) posData->g_x, (float) posData->g_y);
+    //glUniform2f(userData->offsetLoc3, (float) posData->g_x, (float) posData->g_y);
+    glUniform2f(userData->offsetLoc3, 0.0f, 0.0f);
     glVertexAttribPointer(userData->positionLoc5, 3, GL_FLOAT, GL_FALSE, 0, verts2);
-
-    //int lk = pthread_mutex_lock(&m_pinto);
 
     GLint summe = 0;
     // Flächen
     for (m_n = 0; m_n < yama_len; m_n++) {
         glUniform3f(userData->colorLoc, yama[m_n].r, yama[m_n].g, yama[m_n].b);
-        //printf("%i %i %i %d\n", m_n, summe, yama[m_n].len, yama_len);
-        glDrawArrays(GL_TRIANGLE_FAN, summe, yama[m_n].len);
-        //glDrawArrays(GL_LINE_LOOP, 0/*summe*/, /*yama[m_n].len*/26);
+        //printf("\r%i %i %i %d\n", m_n, summe, yama[m_n].len, yama_len);
+        if (m_n == 2)
+            //glDrawArrays(GL_TRIANGLE_FAN, summe, yama[m_n].len);
+            glDrawArrays(GL_POINTS, summe, yama[m_n].len);
         summe += yama[m_n].len;
+        
     }
-
+/*
     // Wege
     glLineWidth(5.0f);
     for (m_n = yama_len; m_n < (werder_len + yama_len); m_n++) {
@@ -732,9 +708,10 @@ void Update2(ESContext *esContext, float deltaTime) {
         //printf("%i %i %i %d\n", m_n, summe, yama[m_n].len, yama_len);
         glDrawArrays(GL_LINE_STRIP, summe, yama[m_n].len);
         summe += yama[m_n].len;
+        break;
     }
+*/
 
-    //pthread_mutex_unlock(&m_pinto);
 
     // GUI
     glUseProgram(userData->programGUI);
@@ -856,6 +833,7 @@ void getLabel(ESContext *esContext) {
 }
 
 void ShutDown(ESContext *esContext) {
+    //void sigfunc(int sig) 
     UserData *userData = esContext->userData;
     POS_T *posData = esContext->posData;
 
@@ -864,11 +842,11 @@ void ShutDown(ESContext *esContext) {
 #endif
     fclose(gps_out);
 
+    sqlite3_close(db);
     //free(userData->vertices);
     //free(userData->indices);
 
     // Delete program object
-    glDeleteProgram(userData->programObject);
     glDeleteProgram(userData->programGUI);
     glDeleteProgram(userData->programKreis);
     glDeleteProgram(userData->programObject2);
@@ -888,11 +866,11 @@ void ShutDown(ESContext *esContext) {
     //free(verts);
     //free(werder);
 
-    PRINTF("the end is near!\n");
+    PRINTF("\rthe end is near!\n");
 }
-static bool intrack = false;
-static time_t timeout = 5; /* seconds */
-static double minmove = 0; /* meters */
+//static bool intrack = false;
+//static time_t timeout = 5; /* seconds */
+//static double minmove = 0; /* meters */
 
 /*
 void conditionally_log_fix(struct gps_data_t gpsdata) {
@@ -926,24 +904,20 @@ void conditionally_log_fix(struct gps_data_t gpsdata) {
 }*/
 
 void loadVert(double lon, double lat) {
-    char filename[50];
     char where[500];
     char where2[500];
     char sql[1000];
 
-    printf("loadVert: %f, %f\n", lon, lat);
+    PRINTF("\rloadVert: %f, %f\n", lon, lat);
 
     //tmp_verts = calloc(10000, sizeof (GLfloat));
     //tmp_yama = calloc(400, sizeof (T_V_EIGENSCHAFTEN));
 
-#define BR 3.0
+#define BR 20.0
     snprintf(where, 500, "where v_lon between %f and  %f and v_lat between %f and %f", lon - BR, lon + BR, lat - BR, lat + BR);
     //sprintf(where, " where v_l_id=4784 ");
-    strncpy(filename, homedir, 50);
-    sqlite3 *db;
+
     char *zErrMsg = 0;
-    char *db_file = strncat(filename, "/workspace/sit2d_2.db", 50);
-    sqlite3_open_v2(db_file, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL);
 
     tmp_vert_len = 0;
 
@@ -968,7 +942,6 @@ void loadVert(double lon, double lat) {
     sqlite3_exec(db, sql, sqc_yama, 0, &zErrMsg);
     tmp_yama_len -= tmp_werder_len;
     //////////////////////
-    sqlite3_close(db);
 
     int lk = pthread_mutex_lock(&m_pinto);
     vert_len = tmp_vert_len;
@@ -978,7 +951,7 @@ void loadVert(double lon, double lat) {
     memcpy(yama, tmp_yama, (yama_len + werder_len) * sizeof (T_V_EIGENSCHAFTEN));
     pthread_mutex_unlock(&m_pinto);
 
-    printf("vert_len: %i  yama_len: %i  werder_len: %i\n", vert_len, yama_len, werder_len);
+    PRINTF("\rvert_len: %i  yama_len: %i  werder_len: %i\n", vert_len, yama_len, werder_len);
     //free(tmp_verts);
     //free(tmp_yama);
 }
@@ -987,21 +960,21 @@ void setPOS(ESContext *esContext) {
     POS_T *posData = esContext->posData;
 
     pow2Z = pow(2.0, *ZOOM);
-    PRINTF("setPOS lon/lat: %f %f\n", posData->gps_longitude, posData->gps_latitude);
+    PRINTF("\rsetPOS lon/lat: %f %f\n", posData->gps_longitude, posData->gps_latitude);
 
     double g_x = (posData->gps_longitude + 180.0) / 360.0 * pow2Z;
     double g_y = (1.0 - log(tan(posData->gps_latitude * rad2deg) + 1.0 / cos(posData->gps_latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
     posData->g_x = g_x;
     posData->g_y = g_y;
-    PRINTF("setPOS g_x: %f %f\n", g_x, g_y);
+    PRINTF("\rsetPOS g_x: %f %f\n", g_x, g_y);
 
     posData->t_x = (int) floor(g_x);
     posData->t_y = (int) (floor(g_y));
-    PRINTF("setPOS t_x: %i %i\n", posData->t_x, posData->t_y);
+    PRINTF("\rsetPOS t_x: %i %i\n", posData->t_x, posData->t_y);
 
     posData->mx = -SCALE / 2.0 + modf(g_x, &mf) * SCALE;
     posData->my = SCALE / 2.0 - modf(g_y, &mf) * SCALE;
-    PRINTF("setPOS m_x: %f %f\n", posData->mx, posData->my);
+    PRINTF("\rsetPOS m_x: %f %f\n", posData->mx, posData->my);
 
     posData->osmS = 40075017 * cos(posData->gps_latitude * M_PI / 180.0) / pow(2.0, *ZOOM + 8) * IMAGE_SIZE;
 }
@@ -1127,6 +1100,8 @@ void * pinto(void *esContext) {
 
     while (1) {
         usleep(500000);
+
+        //posData->v = 30.0f;
 
         old_lat = posData->gps_latitude;
         old_lon = posData->gps_longitude;
@@ -1279,8 +1254,8 @@ void esMainLoop(ESContext *esContext) {
     esMatrixMultiply(&mvpMatrix, &modelview, &perspective);
 #endif
 
-    //while (userInterrupt(esContext) == GL_FALSE) {
-    while (1) {
+    while (userInterrupt(esContext) == GL_FALSE) {
+        //while (1) {
         gettimeofday(&t2, &tz);
         deltatime = (float) (t2.tv_sec - t1.tv_sec + (t2.tv_usec - t1.tv_usec) * 1e-6) * 1000;
         t1 = t2;
@@ -1302,7 +1277,7 @@ void esMainLoop(ESContext *esContext) {
             ms_max = ms;
         //PRINTF("%i\n", ms_max);
         if (totaltime > 4.0f) {
-            //PRINTF("FPS: %3.1f FRAMETIME: %i %4.1f %i  us: %u\n", frames / totaltime, ms_min, (float ) ms_avg / frames, ms_max, us);
+            PRINTF("\rFPS: %3.1f FRAMETIME: %i %4.1f %i  us: %u\n", frames / totaltime, ms_min, (float) ms_avg / frames, ms_max, us);
 
             if ((frames / totaltime) > 30.0) {
                 us += 1000;
@@ -1355,6 +1330,7 @@ int main(int argc, char *argv[]) {
     pthread_t thread_id2;
     pthread_mutex_init(&m_pinto, NULL);
 
+    //signal(SIGINT, ShutDown);
     setvbuf(stdout, (char *) NULL, _IONBF, 0);
 
     userData.width = 800;
@@ -1434,6 +1410,9 @@ int main(int argc, char *argv[]) {
     posData.gpu_t_x = (GLuint) floor(posData.g_x);
     posData.gpu_t_y = (GLuint) floor(posData.g_y);
 
+    strncpy(filename, homedir, 50);
+    char *db_file = strncat(filename, "/sit2d_2.db", 50);
+    assert(sqlite3_open_v2(db_file, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
     loadVert(posData.g_x, posData.g_y);
 
     esMatrixLoadIdentity(&perspective);
@@ -1442,25 +1421,25 @@ int main(int argc, char *argv[]) {
 
     char buf[50];
 
-    snprintf(buf, 50, "%s" RES "/meins/RES/minus.tga", homedir);
+    snprintf(buf, 50, "%s/RES/minus.tga", homedir);
     load_TGA(minus_tex, buf);
-    snprintf(buf, 50, "%s" RES "/meins/RES/plus.tga", homedir);
+    snprintf(buf, 50, "%s/RES/plus.tga", homedir);
     load_TGA(plus_tex, buf);
-    snprintf(buf, 50, "%s" RES "/meins/RES/menu.tga", homedir);
+    snprintf(buf, 50, "%s/RES/menu.tga", homedir);
     load_TGA(menu_tex, buf);
-    snprintf(buf, 50, "%s" RES "/meins/RES/ascii.tga", homedir);
+    snprintf(buf, 50, "%s/RES/ascii.tga", homedir);
     load_TGA(tex_zahlen, buf);
 
     //load_tex_images(&esContext);
     assert(Init(&esContext));
     //upload_tex(&esContext);
-    printf(" %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+    PRINTF("\r%s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
     esRegisterUpdateFunc(&esContext, Update2);
 #ifndef __RASPI__
     esRegisterKeyFunc(&esContext, Key);
 #endif
-    PRINTF("init abgeschlossen\n");
+    PRINTF("\rinit abgeschlossen\n");
 
     //pthread_create(&thread_id1, NULL, &paris, (void*) &esContext);
     //pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
@@ -1469,6 +1448,7 @@ int main(int argc, char *argv[]) {
     intro(&esContext);
     glClearColor(1.0f, 1.0f, 0.0f, 1.0f);
     esMainLoop(&esContext);
+
     //pthread_join(thread_id1, NULL);
     pthread_join(thread_id2, NULL);
     //pthread_join(thread_id3, NULL);
