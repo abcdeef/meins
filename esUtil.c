@@ -225,65 +225,6 @@ GLboolean ESUTIL_API esCreateWindow(ESContext *esContext, const char* title, GLi
 }
 
 ///
-//  esMainLoop()
-//
-//    Start the main loop for the OpenGL ES application
-//
-/*
- void ESUTIL_API esMainLoop(ESContext *esContext) {
- struct timeval t1, t2;
- struct timezone tz;
- float deltatime, deltatime2;
- float totaltime = 0.0f;
- unsigned int frames = 0;
- long int nsec_old = 0;
- unsigned int us = 10000;
-
- gettimeofday(&t1, &tz);
- struct timespec spec1, spec2, spec3;
- unsigned int ms_min = 4294967295, ms_max = 0, ms, ms_avg = 0;
- while (userInterrupt(esContext) == GL_FALSE) {
- gettimeofday(&t2, &tz);
- deltatime = (float) (t2.tv_sec - t1.tv_sec + (t2.tv_usec - t1.tv_usec) * 1e-6) * 1000;
- t1 = t2;
-
- clock_gettime(CLOCK_MONOTONIC, &spec1);
-
- esContext->updateFunc(esContext, deltatime);
- //esContext->drawFunc(esContext);
-
- eglSwapBuffers(esContext->eglDisplay, esContext->eglSurface);
- clock_gettime(CLOCK_MONOTONIC, &spec2);
- totaltime += deltatime / 1000.0;
- frames++;
- ms = (spec2.tv_sec - spec1.tv_sec) * 1000 + (spec2.tv_nsec - spec1.tv_nsec) * 1e-6;
- //printf("%i\n", ms);
- ms_avg += ms;
- if (ms < ms_min)
- ms_min = ms;
- if (ms > ms_max)
- ms_max = ms;
- //printf("%i\n", ms_max);
- if (totaltime > 4.0f) {
- printf("FPS: %3.4f frametime: %i %4.1f %i US: %i\n", frames / totaltime, ms_min, (float) ms_avg / frames, ms_max, us / 1000);
-
- if ((frames / totaltime) > 60.0) {
- us += 1000;
- } else {
- us = us > 1000 ? us - 1000 : us;
- }
-
- totaltime -= 4.0f;
- frames = 0;
- ms_avg = 0;
- ms_min = 4294967295;
- ms_max = 0;
- }
- usleep(us);
- }
- }*/
-
-///
 //  esRegisterDrawFunc()
 //
 void ESUTIL_API esRegisterDrawFunc(ESContext *esContext, void (ESCALLBACK *drawFunc)(ESContext*)) {
