@@ -635,10 +635,55 @@ int minmea_gettime(struct timespec *ts, const struct minmea_date *date, const st
     }
 }
  */
-void nmea(char *line, struct gps_t *data) {
+void nmea(char *line, GPS_T *data) {
     enum minmea_sentence_id nmea_id = minmea_sentence_id(line, true);
 
     switch (nmea_id) {
+        case MINMEA_SENTENCE_RMC:
+        {
+            struct minmea_sentence_rmc frame;
+            if (minmea_parse_rmc(&frame, line)) {
+                char buffer[80];
+                struct tm tmp;
+
+                tmp.tm_year = frame.date.year + 100;
+                tmp.tm_mon = frame.date.month - 1;
+                tmp.tm_mday = frame.date.day;
+                tmp.tm_hour = frame.time.hours;
+                tmp.tm_min = frame.time.minutes;
+                tmp.tm_sec = frame.time.seconds;
+
+                putenv("TZ=UTC");
+                data->stamp = mktime(&tmp);
+                putenv("TZ=Europe/Berlin");
+
+                if (abs(data->stamp - time(NULL)) > 60) {
+                    stime(&data->stamp);
+                }
+                /*
+                struct tm tm2 = *localtime(&data->stamp);
+
+                strftime(buffer, 80, "%d.%m.%Y %H:%M", &tm2);
+                printf(INDENT_SPACES "date/time: %s\n", buffer);
+                */
+                /*printf(INDENT_SPACES "raw coordinates and speed: (%d/%d,%d/%d) %d/%d\n",
+                        frame.latitude.value, frame.latitude.scale,
+                        frame.longitude.value, frame.longitude.scale,
+                        frame.speed.value, frame.speed.scale);
+                printf(INDENT_SPACES "fixed-point coordinates and speed scaled to three decimal places: (%d,%d) %d\n",
+                        minmea_rescale(&frame.latitude, 1000),
+                        minmea_rescale(&frame.longitude, 1000),
+                        minmea_rescale(&frame.speed, 1000));
+                printf(INDENT_SPACES "floating point degree coordinates and speed: (%f,%f) %f\n",
+                        minmea_tocoord(&frame.latitude),
+                        minmea_tocoord(&frame.longitude),
+                        minmea_tofloat(&frame.speed));
+                 */
+            } else {
+                printf(INDENT_SPACES "$xxRMC sentence is not parsed\n");
+            }
+        }
+            break;
         case MINMEA_SENTENCE_GSA:
         {
             struct minmea_sentence_gsa frame;
@@ -662,16 +707,33 @@ void nmea(char *line, struct gps_t *data) {
             }
         }
             break;
-        case MINMEA_INVALID:
+        case MINMEA_SENTENCE_VTG:
         {
-            printf(INDENT_SPACES "$xxxxx sentence is not valid\n");
+            struct minmea_sentence_vtg frame;
+            if (minmea_parse_vtg(&frame, line)) {
+                /*printf(INDENT_SPACES "true track degrees = %f\n",
+                        minmea_tofloat(&frame.true_track_degrees));
+                printf(INDENT_SPACES "magnetic track degrees = %f\n",
+                        minmea_tofloat(&frame.magnetic_track_degrees));
+                printf(INDENT_SPACES "speed knots = %f\n",
+                        minmea_tofloat(&frame.speed_knots));
+                printf(INDENT_SPACES "speed kph = %f\n",
+                        minmea_tofloat(&frame.speed_kph));*/
+                data->angle = minmea_tofloat(&frame.true_track_degrees);
+            } else {
+                printf(INDENT_SPACES "sentence is not parsed\n");
+            }
         }
+            break;
+        case MINMEA_INVALID:
+            break;
+        default:
             break;
     }
 }
 
 char line[MINMEA_MAX_LENGTH];
-unsigned char rx_buffer[1024];
+unsigned char rx_buffer[BUFFER_LEN] = {0};
 int rx_asd = 0;
 
 void gps_open(int *uart0_filestream, char *uart_dev) {
@@ -690,27 +752,32 @@ void gps_open(int *uart0_filestream, char *uart_dev) {
     options.c_lflag = 0;
     tcflush(*uart0_filestream, TCIFLUSH);
     tcsetattr(*uart0_filestream, TCSANOW, &options);
+
+    rx_buffer[BUFFER_LEN - 1] = '\0';
 }
 
-void gps_read(int *uart0_filestream, struct gps_t *data) {
-    int rx_length = read(*uart0_filestream, (void*) &rx_buffer[rx_asd], 255);
+void gps_read(int *uart0_filestream, GPS_T *data) {
+    int rx_length = read(*uart0_filestream, (void*) &rx_buffer[rx_asd], BUFFER_LEN - 1);
 
     if (rx_length > 0) {
         rx_asd += rx_length;
 
-        char *e, *s;
-        e = strchr(rx_buffer, 13);
-        if (e != NULL) {
-            *e = '\0';
+        char *e = &rx_buffer[0], *s = &rx_buffer[0];
 
-            s = strchr(rx_buffer, 36);
-
-            if (s != NULL) {
-                strncpy(line, s, MINMEA_MAX_LENGTH);
-                //printf("|%s|\n", line);
-                nmea(line, data);
+        while (e != NULL) {
+            e = strchr(e, 13);
+            if (e != NULL) {
+                *e = '\0';
+                s = strchr(s, 36);
+                if (s != NULL) {
+                    strncpy(line, s, MINMEA_MAX_LENGTH);
+                    rx_asd = 0;
+                    nmea(line, data);
+                }
+                *e = 13;
+                e++;
+                s = e;
             }
-            rx_asd = 0;
         }
     }
 }
