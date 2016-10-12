@@ -15,18 +15,22 @@
 #include <unistd.h>
 #include <termios.h> 
 
-#define MINMEA_MAX_LENGTH 80
-#define INDENT_SPACES "  "
+#define BUFFER_LEN 512
+#define MINMEA_MAX_LENGTH 84
+#define INDENT_SPACES "\r         "
 #define boolstr(s) ((s) ? "true" : "false")
 
-struct gps_t {
+typedef struct {
     int status;
     int fix_quality;
     int fix_type;
     float PDOP;
     double longitude;
     double latitude;
-};
+    time_t stamp;
+    //struct tm tm;
+    float angle;
+} GPS_T;
 
 enum minmea_sentence_id {
     MINMEA_INVALID = -1,
@@ -206,7 +210,7 @@ bool minmea_parse_gsv(struct minmea_sentence_gsv *frame, const char *sentence);
 bool minmea_parse_vtg(struct minmea_sentence_vtg *frame, const char *sentence);
 
 void gps_open(int *uart0_filestream, char *uart_dev);
-void gps_read(int *uart0_filestream, struct gps_t *data);
+void gps_read(int *uart0_filestream, GPS_T *data);
 
 #endif /* GPS_H */
 
