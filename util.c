@@ -14,10 +14,10 @@ unsigned short red_mask = 0xF800;
 unsigned short green_mask = 0x7E0;
 unsigned short blue_mask = 0x1F;
 
-static size_t write_data(void *ptr, size_t size, size_t nmemb, void *stream) {
+/*static size_t write_data(void *ptr, size_t size, size_t nmemb, void *stream) {
 	size_t written = fwrite(ptr, size, nmemb, (FILE *) stream);
 	return written;
-}
+}*/
 void abort_(const char * s, ...) {
 	va_list args;
 	va_start(args, s);
