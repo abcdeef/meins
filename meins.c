@@ -64,15 +64,19 @@ GLuint *Indices;
 
 int vert_len, tmp_vert_len, yama_len, tmp_yama_len, werder_len, tmp_werder_len;
 
-#define BR 5.0
+#define BR 10.0
 #define V_LEN 20000
 static GLfloat verts[V_LEN] = {0.0f};
 static GLfloat tmp_verts[V_LEN] = {0.0f};
+//static int tmp_verts_2[V_LEN] = {0};
+#ifndef __FPM__
 static GLfloat verts2[V_LEN] = {0.0f};
+#endif
 
 void setPOS(ESContext *esContext);
 static int sqc_yama2(void *a, int argc, char **argv, char **azColName);
 static int sqc_vertex(void *NotUsed, int argc, char **argv, char **azColName);
+//static int sqc_vertex2(void *NotUsed, int argc, char **argv, char **azColName);
 static int sqc_count(void *out_var, int argc, char **argv, char **azColName);
 
 void printM4(ESMatrix *wg);
@@ -107,7 +111,8 @@ typedef struct {
     GLint positionLocKreis;
     GLint texCoordLocKreis;
     GLint positionLocMap;
-    GLint offsetLocMap;
+    GLint offsetLLocMap;
+    GLint offsetMLocMap;
     GLint texCoordLocGui;
     GLint colorLocMap;
     GLint texLocGui;
@@ -147,18 +152,14 @@ typedef struct {
 typedef struct {
     GLuint gpu_t_x;
     GLuint gpu_t_y;
-    GLuint t_x;
-    GLuint t_y;
     GLuint *tiles_x;
     GLuint *tiles_y;
     GLuint *gpu_tiles_x;
     GLuint *gpu_tiles_y;
-    double mx;
-    double my;
     float v_x;
     float v_y;
-    GLfloat v;
-    GLfloat angle;
+    float v;
+    float angle;
     double gps_longitude;
     double gps_latitude;
     double gps_altitude;
@@ -169,6 +170,10 @@ typedef struct {
     float osmS2;
     double g_x;
     double g_y;
+    int m_x;
+    int m_y;
+    int t_x;
+    int t_y;
     short i2c_x;
     short i2c_y;
     short i2c_z;
@@ -350,20 +355,32 @@ int Init(ESContext *esContext) {
             "  gl_FragColor = dis > 0.5 ? vec4(0.0,0.0,0.0,0.0) : vec4(u_f.x,u_f.y,u_f.z,1.0);    \n"
             "}                                                      \n";
 
-    const char *v4 = "#version 100\n"
-            "attribute vec4 a_position; \n"
+    const char *v4 = "#version 100               \n"
+            "attribute vec4 a_position;          \n"
             "attribute vec3 a_color;             \n"
             "uniform mat4 u_mvpMatrix;           \n"
-            "uniform vec2 u_offset;              \n"
             "void main()                         \n"
             "{                                   \n"
             "   gl_Position = a_position;        \n"
-            //"   gl_Position.x -= u_offset.x;     \n"
-            //"   gl_Position.y = u_offset.y - gl_Position.y;     \n"
             "   gl_Position  *= u_mvpMatrix;     \n"
             "   gl_Position.y -= 0.3;            \n"
             "}                                   \n";
-
+    const char *v4_2 = "#version 100             \n"
+            "attribute vec4 a_position;          \n"
+            "attribute vec3 a_color;             \n"
+            "uniform mat4 u_mvpMatrix;           \n"
+            "uniform ivec2 u_offsetL;            \n"
+            "uniform ivec2 u_offsetM;            \n"
+            "void main()                         \n"
+            "{                                   \n"
+            "   gl_Position = a_position;                             \n"
+            "   gl_Position.x -= float(u_offsetL.x);                  \n"
+            "   gl_Position.x -= float(u_offsetM.x)/float(1000000);   \n"
+            "   gl_Position.y = float(u_offsetL.y) - gl_Position.y;   \n"
+            "   gl_Position.y += (float(u_offsetM.y)/float(1000000));   \n"
+            "   gl_Position  *= u_mvpMatrix;     \n"
+            "   gl_Position.y -= 0.3;            \n"
+            "}                                   \n";
     const char *f4 = "#version 100\n"
             "precision mediump float;                      \n"
             "uniform vec3 u_color;                                  \n"
@@ -375,7 +392,11 @@ int Init(ESContext *esContext) {
     // Load the shaders and get a linked program object
     userData->programGUI = esLoadProgram(v2, f2);
     userData->programKreis = esLoadProgram(v3, f3);
+#ifdef __FPM__
+    userData->programMap = esLoadProgram(v4_2, f4);
+#else
     userData->programMap = esLoadProgram(v4, f4);
+#endif
 
     userData->positionLocGui = glGetAttribLocation(userData->programGUI, "a_position");
     userData->texCoordLocGui = glGetAttribLocation(userData->programGUI, "a_texCoord");
@@ -393,7 +414,10 @@ int Init(ESContext *esContext) {
     userData->positionLocMap = glGetAttribLocation(userData->programMap, "a_position");
     userData->colorLocMap = glGetUniformLocation(userData->programMap, "u_color");
     userData->mvpLocMap = glGetUniformLocation(userData->programMap, "u_mvpMatrix");
-    userData->offsetLocMap = glGetUniformLocation(userData->programMap, "u_offset");
+#ifdef __FPM__
+    userData->offsetLLocMap = glGetUniformLocation(userData->programMap, "u_offsetL");
+    userData->offsetMLocMap = glGetUniformLocation(userData->programMap, "u_offsetM");
+#endif
     glEnableVertexAttribArray(userData->positionLocMap);
 
     glGenBuffers(20, &userData->buffindex[0]);
@@ -546,7 +570,7 @@ void intro(ESContext *esContext) {
     usleep(800000);
 }
 
-void Update2(ESContext *esContext, float deltaTime) {
+void Update(ESContext *esContext, float deltaTime) {
     UserData *userData = esContext->userData;
     POS_T *posData = ((ESContext*) esContext)->posData;
 
@@ -578,13 +602,19 @@ void Update2(ESContext *esContext, float deltaTime) {
 
     posData->g_x += deltaTime * posData->v_x / 3600.0f / posData->osmS;
     posData->g_y -= deltaTime * posData->v_y / 3600.0f / posData->osmS;
-    //float asd =  86502.312500f + 0.0008f;
-    //printf("%f %f %f\n",(float) asd, posData->g_y, posData->g_y - (9.0 * 30.0f / 3600.0f / posData->osmS));
 
+#ifdef  __FPM__
+    posData->t_x = (int) floor(posData->g_x);
+    posData->t_y = (int) floor(posData->g_y);
+
+    posData->m_x = (int) floor(fmod(posData->g_x, 1.0f)*1000000.0);
+    posData->m_y = (int) floor(fmod(posData->g_y, 1.0f)*1000000.0);
+#else
     for (m_n = 0; m_n < 3 * vert_len; m_n += 3) {
         verts2[m_n] = verts[m_n] - posData->g_x;
         verts2[m_n + 1] = posData->g_y - verts[m_n + 1];
     }
+#endif
 
     // DRAW
     glClear(GL_COLOR_BUFFER_BIT);
@@ -592,11 +622,16 @@ void Update2(ESContext *esContext, float deltaTime) {
     glUseProgram(userData->programMap);
 
     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_MAP]);
+#ifdef __FPM__
+    glBufferData(GL_ARRAY_BUFFER, sizeof (verts), verts, GL_DYNAMIC_DRAW);
+#else
     glBufferData(GL_ARRAY_BUFFER, sizeof (verts2), verts2, GL_DYNAMIC_DRAW);
-
+#endif
     glUniformMatrix4fv(userData->mvpLocMap, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
-    //glUniform2f(userData->offsetLocMap, posData->g_x, posData->g_y);
-    glUniform2f(userData->offsetLocMap, 0.0f, 0.0f);
+#ifdef __FPM__
+    glUniform2i(userData->offsetLLocMap, posData->t_x, posData->t_y);
+    glUniform2i(userData->offsetMLocMap, posData->m_x, posData->m_y);
+#endif
     glVertexAttribPointer(userData->positionLocMap, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
 
     GLint summe = 0;
@@ -797,6 +832,7 @@ void loadVert(double lon, double lat) {
     PRINTF("\rloadVert TM: %ims\n", ms);
 #endif
     // Wege laden
+    //snprintf(sql, 500, "SELECT v_mlon,v_llon,v_mlat,v_llat FROM vertex t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", vertex);
     snprintf(sql, 500, "SELECT v_lon,v_lat FROM vertex t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", vertex);
     sqlite3_exec(db, sql, sqc_vertex, 0, &zErrMsg);
 #ifdef __TM__
@@ -842,22 +878,19 @@ void setPOS(ESContext *esContext) {
     pow2Z = pow(2.0, *ZOOM);
     PRINTF("\rsetPOS lon/lat: %f %f\n", posData->gps_longitude, posData->gps_latitude);
 
-    double g_x = (posData->gps_longitude + 180.0) / 360.0 * pow2Z;
-    double g_y = (1.0 - log(tan(posData->gps_latitude * rad2deg) + 1.0 / cos(posData->gps_latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
-    posData->g_x = (float) g_x;
-    posData->g_y = (float) g_y;
-    PRINTF("\rsetPOS g_x: %f %f\n", g_x, g_y);
+    posData->g_x = (posData->gps_longitude + 180.0) / 360.0 * pow2Z;
+    posData->g_y = (1.0 - log(tan(posData->gps_latitude * rad2deg) + 1.0 / cos(posData->gps_latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
+    PRINTF("\rsetPOS g: %f %f\n", posData->g_x, posData->g_y);
 
-    posData->t_x = (int) floor(g_x);
-    posData->t_y = (int) (floor(g_y));
-    PRINTF("\rsetPOS t_x: %i %i\n", posData->t_x, posData->t_y);
+    posData->t_x = (int) floor(posData->g_x);
+    posData->t_y = (int) floor(posData->g_y);
+    PRINTF("\rsetPOS t: %i %i\n", posData->t_x, posData->t_y);
 
-    posData->mx = -SCALE / 2.0 + modf(g_x, &mf) * SCALE;
-    posData->my = SCALE / 2.0 - modf(g_y, &mf) * SCALE;
-    PRINTF("\rsetPOS m_x: %f %f\n", posData->mx, posData->my);
+    posData->m_x = (int) floor(fmod(posData->g_x, 1.0f)*1000000.0);
+    posData->m_y = (int) floor(fmod(posData->g_y, 1.0f)*1000000.0);
+    PRINTF("\rsetPOS m: %i %i\n", posData->m_x, posData->m_y);
 
     posData->osmS = 40075017 * cos(posData->gps_latitude * M_PI / 180.0) / pow(2.0, *ZOOM + 8) * IMAGE_SIZE;
-    posData->osmS2 = 40075017 * cosf(posData->gps_latitude * M_PI / 180.0f) / pow(2.0, *ZOOM + 8) * IMAGE_SIZE;
 }
 
 void * foss(void *esContext) {
@@ -1135,15 +1168,12 @@ void * pinto(void *esContext) {
 }
 
 void esMainLoop(ESContext *esContext) {
-    POS_T *posData = esContext->posData;
-
-
     struct timeval t1, t2;
     struct timezone tz;
     float deltatime;
     float totaltime = 0.0f;
     unsigned int frames = 0;
-    unsigned int us = 22000;
+    unsigned int us = 30000;
 #ifdef __TM__
     gettimeofday(&t1, &tz);
     struct timespec spec1, spec2;
@@ -1157,7 +1187,7 @@ void esMainLoop(ESContext *esContext) {
 #ifdef __TM__
         clock_gettime(CLOCK_MONOTONIC, &spec1);
 #endif   
-        Update2(esContext, deltatime);
+        Update(esContext, deltatime);
         eglSwapBuffers(esContext->eglDisplay, esContext->eglSurface);
 #ifdef __TM__
         clock_gettime(CLOCK_MONOTONIC, &spec2);
@@ -1178,11 +1208,11 @@ void esMainLoop(ESContext *esContext) {
 #ifdef __TM__
             PRINTF("\rFPS: %3.1f FRAMETIME: %i %4.1f %i  us: %u\n", frames / totaltime, ms_min, (float) ms_avg / frames, ms_max, us);
 #endif
-            if ((frames / totaltime) > 30.0) {
+            /*if ((frames / totaltime) > 30.0) {
                 us += 1000;
             } else {
                 us = us > 1000 ? us - 1000 : us;
-            }
+            }*/
 
             totaltime -= 4.0f;
             frames = 0;
@@ -1205,6 +1235,19 @@ static int sqc_vertex(void *NotUsed, int argc, char **argv, char **azColName) {
 
     return 0;
 }
+/*
+static int sqc_vertex2(void *NotUsed, int argc, char **argv, char **azColName) {
+    tmp_verts_2[6 * tmp_vert_len] = atoi(argv[0]);
+    tmp_verts_2[6 * tmp_vert_len + 1] = atoi(argv[1]);
+    tmp_verts_2[6 * tmp_vert_len + 2] = atoi(argv[2]);
+    tmp_verts_2[6 * tmp_vert_len + 3] = atoi(argv[3]);
+    tmp_verts_2[6 * tmp_vert_len + 4] = 0;
+    tmp_verts_2[6 * tmp_vert_len + 5] = 0;
+
+    tmp_vert_len++;
+
+    return 0;
+}*/
 
 static int sqc_yama2(void *a, int argc, char **argv, char **azColName) {
     tmp_yama[*((int*) a)].len = atoi(argv[0]);
@@ -1375,8 +1418,8 @@ int main(int argc, char *argv[]) {
     intro(&esContext);
     glClearColor(1.0f, 1.0f, 0.0f, 1.0f);
 
-    pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
-    pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
+    //pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
+    //pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
     //pthread_create(&thread_id3, NULL, &jolla, (void*) &esContext);
 
     esMainLoop(&esContext);
