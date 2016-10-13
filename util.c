@@ -18,6 +18,7 @@ unsigned short blue_mask = 0x1F;
 	size_t written = fwrite(ptr, size, nmemb, (FILE *) stream);
 	return written;
 }*/
+/*
 void abort_(const char * s, ...) {
 	va_list args;
 	va_start(args, s);
@@ -25,7 +26,7 @@ void abort_(const char * s, ...) {
 	fprintf(stderr, "\n");
 	va_end(args);
 	abort();
-}
+}*/
 void printBin(unsigned char *CH) {
 	unsigned char Mask = 0x01;
 	unsigned char P2_B2[8];
