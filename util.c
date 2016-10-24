@@ -27,6 +27,7 @@ void abort_(const char * s, ...) {
 	va_end(args);
 	abort();
 }*/
+
 void printBin(unsigned char *CH) {
 	unsigned char Mask = 0x01;
 	unsigned char P2_B2[8];
@@ -167,14 +168,12 @@ int load_png(FILE *fp, TEX_BUFFER_FORMAT *dst, unsigned int stride, unsigned sho
 	png_bytepp row_pointers = png_get_rows(png_ptr, info_ptr);
 	//png_read_image(png_ptr, row_pointers);
 
-#ifdef __565__
 	TEX_BUFFER_FORMAT *dst_z = dst;
 	TEX_BUFFER_FORMAT r, g, b, rgb;
 	unsigned short n;
-#endif
+
 
 	for (i = 0; i < image_size; i++) {
-#ifdef __565__
 		for (n = 0; n < image_size; n++) {
 			r = *(row_pointers[i] + 3 * n) << 8;
 			g = *(row_pointers[i] + 3 * n + 1) << 3;
@@ -182,9 +181,6 @@ int load_png(FILE *fp, TEX_BUFFER_FORMAT *dst, unsigned int stride, unsigned sho
 			rgb = (r & red_mask) | (g & green_mask) | (b & blue_mask);
 			*dst_z++ = rgb;
 		}
-#else
-		memcpy(dst + (stride * i), row_pointers[i], 3 * image_size);
-#endif
 	}
 	png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 

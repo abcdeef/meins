@@ -12,6 +12,7 @@
 #include <linux/reboot.h>
 #include <linux/input.h>
 #include <sys/reboot.h>
+#include <limits.h>
 #include "util.h"
 #include "gui.h"
 #include "obd.h"
@@ -42,38 +43,54 @@
 #define BUFF_INDEX_TXT 1
 #define BUFF_INDEX_MAP 2
 
+#define FBO_WIDTH 1024
+#define FBO_HEIGHT 1024
 
 FILE *gps_out, *gps_in;
 FILE *sout;
 
-char time_str[50];
+float trans_x = 0.0f, trans_y = 0.0f, trans_z = 0.0f, orto1 = 0.0f, orto2 = 0.0f, orto3 = 0.0f, orto4 = 0.0f;
+
+
+char line1_str[21];
+char line2_str[21];
 
 sqlite3 *db;
 
 typedef struct {
+    int id;
+    int index;
     GLsizei len;
     GLfloat r, g, b;
-
+    int lon1, lon2, lat1, lat2;
 } T_V_EIGENSCHAFTEN;
 
-static T_V_EIGENSCHAFTEN yama[2000];
-static T_V_EIGENSCHAFTEN tmp_yama[400];
+typedef struct {
+    int id;
+    int index;
+    GLsizei len;
+    unsigned short r, g, b;
+} T_V_EIGENSCHAFTEN2;
+
+#define Y_LEN 20000
+static T_V_EIGENSCHAFTEN yama[Y_LEN];
+static T_V_EIGENSCHAFTEN werder[Y_LEN];
+static T_V_EIGENSCHAFTEN tmp_yama[Y_LEN];
 
 unsigned int Indices_len;
 GLuint *Indices;
 
 int vert_len, tmp_vert_len, yama_len, tmp_yama_len, werder_len, tmp_werder_len;
 
-#define BR 10.0
-#define V_LEN 20000
+#define BR 8.0
+#define V_LEN 200000
 static GLfloat verts[V_LEN] = {0.0f};
 static GLfloat tmp_verts[V_LEN] = {0.0f};
-//static int tmp_verts_2[V_LEN] = {0};
-#ifndef __FPM__
-static GLfloat verts2[V_LEN] = {0.0f};
-#endif
+
+int sqc_tmp;
 
 void setPOS(ESContext *esContext);
+static int sqc_yama(void *a, int argc, char **argv, char **azColName);
 static int sqc_yama2(void *a, int argc, char **argv, char **azColName);
 static int sqc_vertex(void *NotUsed, int argc, char **argv, char **azColName);
 //static int sqc_vertex2(void *NotUsed, int argc, char **argv, char **azColName);
@@ -93,7 +110,7 @@ GLubyte *ZOOM;
 int dx = 0, dy = 0, m_n, m_m, p_n, p_m;
 GLuint *tmp;
 //static struct fixsource_t source;
-ESMatrix perspective, modelview, mvpMatrix;
+ESMatrix perspective, modelview, mvpMatrix, mvpTex;
 
 unsigned int stride;
 float gps_status[3] = {1.0f, 0.0f, 0.0f};
@@ -103,24 +120,37 @@ pthread_mutex_t m_pinto = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
     GLuint programMap;
+    GLuint programFBO;
     GLuint programGUI;
     GLuint programKreis;
+    GLuint programTex;
 
     // Attribute locations
     GLint positionLocGui;
     GLint positionLocKreis;
     GLint texCoordLocKreis;
     GLint positionLocMap;
+    GLint positionLocFBO;
     GLint offsetLLocMap;
+    GLint offsetLLocFBO;
+    GLint offsetLLocTex;
     GLint offsetMLocMap;
+    GLint offsetMLocMap2;
+    GLint offsetMLocTex;
     GLint texCoordLocGui;
     GLint colorLocMap;
+    GLint colorLocFBO;
     GLint texLocGui;
     GLint samplerLocGui;
+    GLint samplerLocTex;
+    GLint positionLocTex;
+    GLint texCoordLocTex;
 
     // Uniform locations
     GLint mvpLocMap;
+    GLint mvpLocFBO;
     GLint colorLocGPS_I;
+    GLint mvpLocTex;
 
     // Vertex data
     GLfloat *vertices;
@@ -144,7 +174,13 @@ typedef struct {
     GLuint *texreload;
     TEX_BUFFER_FORMAT *tex_buffer;
     GLuint textureId;
-
+    //
+#ifdef __FBO__
+    GLuint FramebufferName;
+    GLuint renderedTexture;
+    GLuint depthrenderbuffer;
+    GLuint fbo_texture;
+#endif
     //Buffer
     GLuint buffindex[20];
 } UserData;
@@ -177,6 +213,8 @@ typedef struct {
     short i2c_x;
     short i2c_y;
     short i2c_z;
+
+    float obd_volt;
 } POS_T;
 
 GLboolean GenMipMap2D(GLubyte *src, GLubyte **dst, int srcWidth, int srcHeight, int *dstWidth, int *dstHeight) {
@@ -320,6 +358,11 @@ int load_tex_images(ESContext *esContext) {
 int Init(ESContext *esContext) {
     UserData *userData = esContext->userData;
 
+    PRINTF("\r%s\n", glGetString(GL_VERSION));
+    PRINTF("\r%s\n", glGetString(GL_VENDOR));
+    PRINTF("\r%s\n", glGetString(GL_RENDERER));
+    PRINTF("\r%s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+
     const char *v2 = "attribute vec4 a_position; \n"
             "attribute vec2 a_texCoord;          \n"
             "varying vec2 v_texCoord;            \n"
@@ -354,18 +397,7 @@ int Init(ESContext *esContext) {
             "  float dis = distance(v_texCoord, vec2(0.5, 0.5));                                  \n"
             "  gl_FragColor = dis > 0.5 ? vec4(0.0,0.0,0.0,0.0) : vec4(u_f.x,u_f.y,u_f.z,1.0);    \n"
             "}                                                      \n";
-
     const char *v4 = "#version 100               \n"
-            "attribute vec4 a_position;          \n"
-            "attribute vec3 a_color;             \n"
-            "uniform mat4 u_mvpMatrix;           \n"
-            "void main()                         \n"
-            "{                                   \n"
-            "   gl_Position = a_position;        \n"
-            "   gl_Position  *= u_mvpMatrix;     \n"
-            "   gl_Position.y -= 0.3;            \n"
-            "}                                   \n";
-    const char *v4_2 = "#version 100             \n"
             "attribute vec4 a_position;          \n"
             "attribute vec3 a_color;             \n"
             "uniform mat4 u_mvpMatrix;           \n"
@@ -389,14 +421,67 @@ int Init(ESContext *esContext) {
             "  gl_FragColor = vec4(u_color.x,u_color.y,u_color.z,1.0);                \n"
             "}                                                      \n";
 
+    const char *v5 = "#version 100               \n"
+            "attribute vec4 a_position;          \n"
+            "uniform mat4 u_mvpMatrix;           \n"
+            "uniform ivec2 u_offsetL;            \n"
+            "void main()                         \n"
+            "{                                   \n"
+            "   gl_Position = a_position;        \n"
+            "   gl_Position.x = gl_Position.x - float(u_offsetL.x);      \n"
+            "   gl_Position.y -= float(u_offsetL.y);    \n"
+            "   gl_Position  *= u_mvpMatrix;     \n"
+            //"   gl_Position.z -= 1.0;"
+            "}                                   \n";
+    const char *f5 = "#version 100              \n"
+            "precision mediump float;            \n"
+            "uniform vec3 u_color;               \n"
+            "void main()                         \n"
+            "{                                   \n"
+            "  gl_FragColor = vec4(u_color.x,u_color.y,u_color.z,1.0);                \n"
+            "}                                                      \n";
+
+    const char *v6 = "#version 100               \n"
+            "attribute vec4 a_position;          \n"
+            "attribute vec2 a_texCoord;          \n"
+            "varying vec2 v_texCoord;            \n"
+            "uniform mat4 u_mvpMatrix;           \n"
+            "uniform ivec2 u_offsetL;            \n"
+            "uniform ivec2 u_offsetM;            \n"
+            "void main()                         \n"
+            "{                                   \n"
+            "   gl_Position = a_position;        \n"
+            "   gl_Position.x = gl_Position.x - float(u_offsetL.x);      \n"
+            //"   gl_Position.x -= float(u_offsetM.x)/float(1000000);   \n"
+            "   gl_Position.y -= float(u_offsetL.y);    \n"
+            //"   gl_Position.y += (float(u_offsetM.y)/float(1000000));   \n"
+            "   gl_Position  *= u_mvpMatrix;     \n"
+            //"   gl_Position.y -= 0.3;            \n"
+            "   v_texCoord = a_texCoord;         \n"
+            "}                                   \n";
+    const char *f6 = "precision mediump float;                   \n"
+            "varying vec2 v_texCoord;                            \n"
+            "uniform sampler2D s_texture;                        \n"
+            "void main()                                         \n"
+            "{                                                   \n"
+            "  gl_FragColor = texture2D( s_texture, v_texCoord );\n"
+            "}                                                   \n";
+
     // Load the shaders and get a linked program object
     userData->programGUI = esLoadProgram(v2, f2);
     userData->programKreis = esLoadProgram(v3, f3);
-#ifdef __FPM__
-    userData->programMap = esLoadProgram(v4_2, f4);
-#else
     userData->programMap = esLoadProgram(v4, f4);
-#endif
+    userData->programFBO = esLoadProgram(v5, f5);
+    userData->programTex = esLoadProgram(v6, f6);
+
+    userData->positionLocTex = glGetAttribLocation(userData->programTex, "a_position");
+    userData->texCoordLocTex = glGetAttribLocation(userData->programTex, "a_texCoord");
+    userData->mvpLocTex = glGetUniformLocation(userData->programTex, "u_mvpMatrix");
+    userData->samplerLocTex = glGetUniformLocation(userData->programTex, "s_texture");
+    userData->offsetLLocTex = glGetUniformLocation(userData->programTex, "u_offsetL");
+    userData->offsetMLocTex = glGetUniformLocation(userData->programTex, "u_offsetM");
+    glEnableVertexAttribArray(userData->positionLocTex);
+    glEnableVertexAttribArray(userData->texCoordLocTex);
 
     userData->positionLocGui = glGetAttribLocation(userData->programGUI, "a_position");
     userData->texCoordLocGui = glGetAttribLocation(userData->programGUI, "a_texCoord");
@@ -414,11 +499,15 @@ int Init(ESContext *esContext) {
     userData->positionLocMap = glGetAttribLocation(userData->programMap, "a_position");
     userData->colorLocMap = glGetUniformLocation(userData->programMap, "u_color");
     userData->mvpLocMap = glGetUniformLocation(userData->programMap, "u_mvpMatrix");
-#ifdef __FPM__
     userData->offsetLLocMap = glGetUniformLocation(userData->programMap, "u_offsetL");
     userData->offsetMLocMap = glGetUniformLocation(userData->programMap, "u_offsetM");
-#endif
     glEnableVertexAttribArray(userData->positionLocMap);
+
+    userData->positionLocFBO = glGetAttribLocation(userData->programFBO, "a_position");
+    userData->colorLocFBO = glGetUniformLocation(userData->programFBO, "u_color");
+    userData->mvpLocFBO = glGetUniformLocation(userData->programFBO, "u_mvpMatrix");
+    userData->offsetLLocFBO = glGetUniformLocation(userData->programFBO, "u_offsetL");
+    glEnableVertexAttribArray(userData->positionLocFBO);
 
     glGenBuffers(20, &userData->buffindex[0]);
     // NICHT LÖSCHEN! der raspi  brauch das
@@ -498,6 +587,44 @@ int Init(ESContext *esContext) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
+#ifdef __FBO__
+    GLint maxRenderbufferSize;
+    glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbufferSize);
+    PRINTF("\rGL_MAX_RENDERBUFFER_SIZE: %ix%i\n", maxRenderbufferSize, maxRenderbufferSize);
+    if ((maxRenderbufferSize <= FBO_WIDTH) || (maxRenderbufferSize <= FBO_HEIGHT)) {
+        printf("Cannot use framebuffer objects!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    glGenFramebuffers(1, &userData->FramebufferName);
+    glGenTextures(1, &userData->renderedTexture);
+    glGenRenderbuffers(1, &userData->depthrenderbuffer);
+
+    glBindTexture(GL_TEXTURE_2D, userData->renderedTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, FBO_WIDTH, FBO_HEIGHT,
+            0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, userData->depthrenderbuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, FBO_WIDTH, FBO_HEIGHT);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, userData->FramebufferName);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, userData->renderedTexture, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, userData->depthrenderbuffer);
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        printf("Framebuffer object is not complete!\n");
+        exit(EXIT_FAILURE);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+#endif
+
     glViewport(0, -160, 800, 800);
 
     return GL_TRUE;
@@ -570,13 +697,33 @@ void intro(ESContext *esContext) {
     usleep(800000);
 }
 
+/*static void renderMap(void) {
+    glUniformMatrix4fv(userData->mvpLocMap, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
+    glUniform2i(userData->offsetLLocMap, posData->t_x, posData->t_y);
+    glUniform2i(userData->offsetMLocMap, posData->m_x, posData->m_y);
+    glVertexAttribPointer(userData->positionLocMap, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
+
+    // Flächen
+    for (m_n = 0; m_n < yama_len; m_n++) {
+        glUniform3f(userData->colorLocMap, yama[m_n].r, yama[m_n].g, yama[m_n].b);
+        glDrawArrays(GL_TRIANGLE_FAN, yama[m_n].index, yama[m_n].len);
+    }
+
+    // Wege
+    glLineWidth(5.0f);
+    for (m_n = 0; m_n < werder_len; m_n++) {
+        glUniform3f(userData->colorLocMap, werder[m_n].r, werder[m_n].g, werder[m_n].b);
+        glDrawArrays(GL_LINE_STRIP, werder[m_n].index, werder[m_n].len);
+    }
+}*/
+
 void Update(ESContext *esContext, float deltaTime) {
-    UserData *userData = esContext->userData;
+    UserData *userData = ((ESContext*) esContext)->userData;
     POS_T *posData = ((ESContext*) esContext)->posData;
 
     esMatrixLoadIdentity(&modelview);
     esRotate(&modelview, posData->angle, 0.0, 0.0, 1.0);
-    esTranslate(&modelview, 0.0, V_Z, 0.0);
+    esTranslate(&modelview, 0.0f, V_Z, 0.0f);
 
 #ifdef __SSE__
     __m128 row1 = _mm_load_ps(&perspective.m[0][0]);
@@ -603,52 +750,144 @@ void Update(ESContext *esContext, float deltaTime) {
     posData->g_x += deltaTime * posData->v_x / 3600.0f / posData->osmS;
     posData->g_y -= deltaTime * posData->v_y / 3600.0f / posData->osmS;
 
-#ifdef  __FPM__
     posData->t_x = (int) floor(posData->g_x);
     posData->t_y = (int) floor(posData->g_y);
 
     posData->m_x = (int) floor(fmod(posData->g_x, 1.0f)*1000000.0);
     posData->m_y = (int) floor(fmod(posData->g_y, 1.0f)*1000000.0);
-#else
-    for (m_n = 0; m_n < 3 * vert_len; m_n += 3) {
-        verts2[m_n] = verts[m_n] - posData->g_x;
-        verts2[m_n + 1] = posData->g_y - verts[m_n + 1];
-    }
-#endif
+
 
     // DRAW
-    glClear(GL_COLOR_BUFFER_BIT);
+#ifdef __FBO__
+    //if (new_tex == 1) {
+    glBindFramebuffer(GL_FRAMEBUFFER, userData->FramebufferName);
+    glViewport(0, 0, 480, 480);
 
-    glUseProgram(userData->programMap);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    glUseProgram(userData->programFBO);
     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_MAP]);
-#ifdef __FPM__
-    glBufferData(GL_ARRAY_BUFFER, sizeof (verts), verts, GL_DYNAMIC_DRAW);
-#else
-    glBufferData(GL_ARRAY_BUFFER, sizeof (verts2), verts2, GL_DYNAMIC_DRAW);
-#endif
-    glUniformMatrix4fv(userData->mvpLocMap, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
-#ifdef __FPM__
-    glUniform2i(userData->offsetLLocMap, posData->t_x, posData->t_y);
-    glUniform2i(userData->offsetMLocMap, posData->m_x, posData->m_y);
-#endif
-    glVertexAttribPointer(userData->positionLocMap, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
 
-    GLint summe = 0;
+    glBufferData(GL_ARRAY_BUFFER, 12 * vert_len, verts, GL_DYNAMIC_DRAW);
+
+    glUniformMatrix4fv(userData->mvpLocFBO, 1, GL_FALSE, (GLfloat*) mvpTex.m);
+    glUniform2i(userData->offsetLLocFBO, posData->t_x, posData->t_y);
+    glVertexAttribPointer(userData->positionLocFBO, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
+
     // Flächen
     for (m_n = 0; m_n < yama_len; m_n++) {
-        glUniform3f(userData->colorLocMap, yama[m_n].r, yama[m_n].g, yama[m_n].b);
-        glDrawArrays(GL_TRIANGLE_FAN, summe, yama[m_n].len);
-        summe += yama[m_n].len;
+        glUniform3f(userData->colorLocFBO, yama[m_n].r, yama[m_n].g, yama[m_n].b);
+        glDrawArrays(GL_TRIANGLE_FAN, yama[m_n].index, yama[m_n].len);
     }
 
     // Wege
     glLineWidth(5.0f);
-    for (m_n = yama_len; m_n < werder_len; m_n++) {
-        glUniform3f(userData->colorLocMap, yama[m_n].r, yama[m_n].g, yama[m_n].b);
-        glDrawArrays(GL_LINE_STRIP, summe, yama[m_n].len);
-        summe += yama[m_n].len;
+    for (m_n = 0; m_n < werder_len; m_n++) {
+        glUniform3f(userData->colorLocFBO, werder[m_n].r, werder[m_n].g, werder[m_n].b);
+        glDrawArrays(GL_LINE_STRIP, werder[m_n].index, werder[m_n].len);
     }
+    // Gittenetz
+    glLineWidth(1.0f);
+    for (float col = 1.0f; col < 2.0f * BR; col++) {
+        const GLfloat quadVertices[] = {
+            posData->t_x + col - BR, posData->t_y - BR, 0.0f,
+            posData->t_x + col - BR, posData->t_y + 3.0f, 0.0f
+        };
+        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_TXT]);
+        glBufferData(GL_ARRAY_BUFFER, sizeof (quadVertices), quadVertices, GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(userData->positionLocFBO, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
+        glUniform3f(userData->colorLocFBO, 0.0f, 0.0f, 0.0f);
+        glDrawArrays(GL_LINES, 0, 2);
+    }
+    for (float row = 1.0f; row < 2.0f * BR; row++) {
+        const GLfloat quadVertices[] = {
+            posData->t_x - BR, posData->t_y + row - BR, 0.0f,
+            posData->t_x + BR, posData->t_y + row - BR, 0.0f
+        };
+        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_TXT]);
+        glBufferData(GL_ARRAY_BUFFER, sizeof (quadVertices), quadVertices, GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(userData->positionLocFBO, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
+        glUniform3f(userData->colorLocFBO, 0.0f, 0.0f, 0.0f);
+        glDrawArrays(GL_LINES, 0, 2);
+        //}
+        //
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        new_tex = 0;
+    }
+#else
+
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(userData->programMap);
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_MAP]);
+
+    if (new_tex == 1) {
+        glBufferData(GL_ARRAY_BUFFER, 12 * vert_len, verts, GL_DYNAMIC_DRAW);
+        new_tex = 0;
+    }
+    glViewport(0, -160, 800, 800);
+
+    glUniformMatrix4fv(userData->mvpLocMap, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
+    glUniform2i(userData->offsetLLocMap, posData->t_x, posData->t_y);
+    glUniform2i(userData->offsetMLocMap, posData->m_x, posData->m_y);
+    glVertexAttribPointer(userData->positionLocMap, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
+
+    // Flächen
+    for (m_n = 0; m_n < yama_len; m_n++) {
+        glUniform3f(userData->colorLocMap, yama[m_n].r, yama[m_n].g, yama[m_n].b);
+        glDrawArrays(GL_TRIANGLE_FAN, yama[m_n].index, yama[m_n].len);
+    }
+
+    // Wege
+    glLineWidth(5.0f);
+    for (m_n = 0; m_n < werder_len; m_n++) {
+        glUniform3f(userData->colorLocMap, werder[m_n].r, werder[m_n].g, werder[m_n].b);
+        glDrawArrays(GL_LINE_STRIP, werder[m_n].index, werder[m_n].len);
+    }
+#endif
+
+#ifdef __FBO__
+    glUseProgram(userData->programTex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(userData->samplerLocTex, 0);
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+
+    GLfloat fgh[] = {
+        posData->t_x - BR, posData->t_y + BR, 0.0f, 0.0f,
+        posData->t_x - BR, posData->t_y - BR, 0.0f, 1.0f,
+        posData->t_x + BR, posData->t_y + BR, 1.0f, 0.0f,
+        posData->t_x + BR, posData->t_y - BR, 1.0f, 1.0f
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_TXT]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof (fgh), fgh, GL_DYNAMIC_DRAW);
+
+    glVertexAttribPointer(userData->positionLocTex, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
+    glVertexAttribPointer(userData->texCoordLocTex, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
+    ////////
+    ESMatrix per, model, mvp;
+    esMatrixLoadIdentity(&model);
+    esMatrixLoadIdentity(&per);
+
+    //glViewport(0, -160, 800, 800);
+    glViewport(0, 0, 800, 480);
+    esOrtho(&per, -orto1, orto1, -orto2, orto2, -50, 50);
+    //esRotate(&modelview, posData->angle, 0.0, 0.0, 1.0);
+    esTranslate(&model, trans_x, trans_y, trans_z);
+
+    esMatrixMultiply(&mvp, &model, &per);
+
+    glUniformMatrix4fv(userData->mvpLocTex, 1, GL_FALSE, (GLfloat*) mvp.m);
+    ////////////////////
+    glUniform2i(userData->offsetLLocTex, posData->t_x, posData->t_y);
+    glUniform2i(userData->offsetMLocTex, posData->m_x, posData->m_y);
+    glBindTexture(GL_TEXTURE_2D, userData->renderedTexture);
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+#endif
+
 
     // GUI
     glUseProgram(userData->programGUI);
@@ -670,10 +909,9 @@ void Update(ESContext *esContext, float deltaTime) {
     glDrawArrays(GL_TRIANGLE_STRIP, 11, 4);
 
     // Text
-    renderText(userData, time_str, -1.0f, 0.54f);
     //renderInt(userData, posData->obd_speed, -1.0f, 0.54f);
-    renderFloat(userData, posData->g_x, -1.0f, 0.4f);
-    renderFloat(userData, posData->g_y, -1.0f, 0.26f);
+    renderFloat(userData, posData->g_x, -1.0f, 0.54f);
+    renderFloat(userData, posData->g_y, -1.0f, 0.4f);
 
     // GPS_I
     glUseProgram(userData->programKreis);
@@ -682,13 +920,86 @@ void Update(ESContext *esContext, float deltaTime) {
     glVertexAttribPointer(userData->texCoordLocKreis, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
     glUniform3f(userData->colorLocGPS_I, gps_status[0], gps_status[1], gps_status[2]);
     glDrawArrays(GL_TRIANGLE_STRIP, 15, 4);
+
 }
 
 void Key(ESContext *esContext, unsigned char a, int b, int c) {
     POS_T *posData = esContext->posData;
     uint l = 0;
 
+    printf("%i\n", a);
     switch (a) {
+        case 52:
+            trans_x = 0.0f;
+            printf("%f %f %f\n", trans_x, trans_y, trans_z);
+            break;
+        case 53:
+            trans_y = 0.0f;
+            printf("%f %f %f\n", trans_x, trans_y, trans_z);
+            break;
+        case 54:
+            trans_z = 0.0f;
+            printf("%f %f %f\n", trans_x, trans_y, trans_z);
+            break;
+        case 55:
+            trans_x += 0.1f;
+            printf("%f %f %f\n", trans_x, trans_y, trans_z);
+            break;
+        case 56:
+            trans_y += 0.1f;
+            printf("%f %f %f\n", trans_x, trans_y, trans_z);
+            break;
+        case 57:
+            trans_z += 0.1f;
+            printf("%f %f %f\n", trans_x, trans_y, trans_z);
+            break;
+        case 49:
+            trans_x -= 0.1f;
+            printf("%f %f %f\n", trans_x, trans_y, trans_z);
+            break;
+        case 50:
+            trans_y -= 0.1f;
+            printf("%f %f %f\n", trans_x, trans_y, trans_z);
+            break;
+        case 51:
+            trans_z -= 0.1f;
+            printf("%f %f %f\n", trans_x, trans_y, trans_z);
+            break;
+        case 47:
+            orto1 -= 0.1f;
+            printf("%f/%f\n", orto1, orto2);
+            break;
+        case 42:
+            orto1 += 0.1f;
+            printf("%f/%f\n", orto1, orto2);
+            break;
+        case 45:
+            orto2 -= 0.1f;
+            printf("%f/%f\n", orto1, orto2);
+            break;
+        case 43:
+            orto2 += 0.1f;
+            printf("%f/%f\n", orto1, orto2);
+            break;
+
+
+        case 105:
+            orto3 -= 0.1f;
+            printf("%f/%f\n", orto3, orto4);
+            break;
+        case 107:
+            orto3 += 0.1f;
+            printf("%f/%f\n", orto3, orto4);
+            break;
+        case 111:
+            orto4 -= 0.1f;
+            printf("%f/%f\n", orto3, orto4);
+            break;
+        case 108:
+            orto4 += 0.1f;
+            printf("%f/%f\n", orto3, orto4);
+            break;
+
         case 119:
             posData->v += 30.0f;
             PRINTF("v: %f\n", posData->v)
@@ -715,53 +1026,29 @@ void Key(ESContext *esContext, unsigned char a, int b, int c) {
             PRINTF("angle: %f\n", posData->angle)
                     ;
             break;
-        case 43:
-            if (*ZOOM < 18) {
-                GLubyte z_old = *ZOOM;
-                ZOOM--;
-                setPOS(esContext);
-                for (l = 0; l < 3 * vert_len; l += 3) {
-                    verts[l] *= 2.0f * (*ZOOM - z_old);
-                    verts[l + 1] *= 2.0f * (*ZOOM - z_old);
+            /*case 43:
+                if (*ZOOM < 18) {
+                    GLubyte z_old = *ZOOM;
+                    ZOOM--;
+                    setPOS(esContext);
+                    for (l = 0; l < 3 * vert_len; l += 3) {
+                        verts[l] *= 2.0f * (*ZOOM - z_old);
+                        verts[l + 1] *= 2.0f * (*ZOOM - z_old);
+                    }
                 }
-            }
-            break;
-        case 45:
-            if (*ZOOM > 8) {
-                GLubyte z_old = *ZOOM;
-                ZOOM++;
-                setPOS(esContext);
-                for (l = 0; l < 3 * vert_len; l += 3) {
-                    verts[l] /= 2.0f * (z_old - *ZOOM);
-                    verts[l + 1] /= 2.0f * (z_old - *ZOOM);
+                break;
+            case 45:
+                if (*ZOOM > 8) {
+                    GLubyte z_old = *ZOOM;
+                    ZOOM++;
+                    setPOS(esContext);
+                    for (l = 0; l < 3 * vert_len; l += 3) {
+                        verts[l] /= 2.0f * (z_old - *ZOOM);
+                        verts[l + 1] /= 2.0f * (z_old - *ZOOM);
+                    }
                 }
-            }
-            break;
+                break;*/
     }
-
-    esMatrixLoadIdentity(&modelview);
-    esRotate(&modelview, posData->angle, 0.0, 0.0, 1.0);
-    //printM4(&modelview);
-    esTranslate(&modelview, 0.0, V_Z, 0.0);
-
-#ifdef __SSE__
-    __m128 row1 = _mm_load_ps(&perspective.m[0][0]);
-    __m128 row2 = _mm_load_ps(&perspective.m[1][0]);
-    __m128 row3 = _mm_load_ps(&perspective.m[2][0]);
-    __m128 row4 = _mm_load_ps(&perspective.m[3][0]);
-    for (m_m = 0; m_m < 4; m_m++) {
-        __m128 brod1 = _mm_set1_ps(modelview.m[m_m][0]);
-        __m128 brod2 = _mm_set1_ps(modelview.m[m_m][1]);
-        __m128 brod3 = _mm_set1_ps(modelview.m[m_m][2]);
-        __m128 brod4 = _mm_set1_ps(modelview.m[m_m][3]);
-        __m128 row =
-                _mm_add_ps(_mm_add_ps(_mm_mul_ps(brod1, row1), _mm_mul_ps(brod2, row2)), _mm_add_ps(_mm_mul_ps(brod3, row3), _mm_mul_ps(brod4, row4)));
-
-        _mm_store_ps(&mvpMatrix.m[m_m][0], row);
-    }
-#else
-    esMatrixMultiply(&mvpMatrix, &modelview, &perspective);
-#endif
 
 }
 //static bool intrack = false;
@@ -798,16 +1085,48 @@ void conditionally_log_fix(struct gps_data_t gpsdata) {
     }
     PRINTF("lat=\"%f\" lon=\"%f\"\n", gpsdata.fix.latitude, gpsdata.fix.longitude);
 }*/
+int linear_suche(T_V_EIGENSCHAFTEN *M, int count, int id) {
+    for (int a = 0; a < count; a++) {
+        if (M[a].id == id) {
+            return a;
+        }
+    }
+    return -1;
+}
 
-void loadVert(double lon, double lat) {
+int binaere_suche(T_V_EIGENSCHAFTEN *M, int count, int id) {
+    int mitte;
+    int links = 0;
+    int rechts = count - 1;
+
+    while (links <= rechts) {
+        mitte = links + ((rechts - links) / 2);
+
+        if (M[mitte].id == id) {
+            return mitte;
+        } else {
+            if (M[mitte].id > id) {
+                rechts = mitte - 1;
+            } else {
+
+                links = mitte + 1;
+            }
+        }
+    }
+    return -1;
+}
+
+int cmpfunc(const void * a, const void * b) {
+    return (((T_V_EIGENSCHAFTEN*) a)->id - ((T_V_EIGENSCHAFTEN*) b)->id);
+}
+
+void loadVert(double lon, double lat, double d) {
     char where[110];
     char vertex[200];
     char polygon[200];
     char sql[500];
 
-    PRINTF("\rloadVert: %f, %f\n", lon, lat);
-
-    snprintf(where, 110, " v_lon between %f and  %f and v_lat between %f and %f", lon - BR, lon + BR, lat - BR, lat + BR);
+    snprintf(where, 110, " v_lon between %f and  %f and v_lat between %f and %f", lon - d, lon + d, lat - d, lat + d);
     snprintf(vertex, 200, "(SELECT DISTINCT v_l_id FROM vertex WHERE %s)", where);
     snprintf(polygon, 200, "(SELECT DISTINCT v_l_id FROM polygon WHERE %s)", where);
 
@@ -816,6 +1135,7 @@ void loadVert(double lon, double lat) {
     tmp_vert_len = 0;
     tmp_yama_len = 0;
     tmp_werder_len = 0;
+    sqc_tmp = 0;
 
 #ifdef __TM__
     unsigned int ms = 0;
@@ -827,7 +1147,7 @@ void loadVert(double lon, double lat) {
     sqlite3_exec(db, sql, sqc_vertex, 0, &zErrMsg);
 #ifdef __TM__
     clock_gettime(CLOCK_MONOTONIC, &spec2);
-    PRINTF("\r%s\n", sql);
+    //PRINTF("\r%s\n", sql);
     ms = (spec2.tv_sec - spec1.tv_sec) * 1000 + (spec2.tv_nsec - spec1.tv_nsec) * 1e-6;
     PRINTF("\rloadVert TM: %ims\n", ms);
 #endif
@@ -837,42 +1157,141 @@ void loadVert(double lon, double lat) {
     sqlite3_exec(db, sql, sqc_vertex, 0, &zErrMsg);
 #ifdef __TM__
     clock_gettime(CLOCK_MONOTONIC, &spec1);
-    PRINTF("\r%s\n", sql);
+    //PRINTF("\r%s\n", sql);
     ms = (spec1.tv_sec - spec2.tv_sec) * 1000 + (spec1.tv_nsec - spec2.tv_nsec) * 1e-6;
     PRINTF("\rloadVert TM: %ims\n", ms);
 #endif  
     // Eigenschaften Fläche
-    snprintf(sql, 500, "SELECT L_COUNT,L_F_R,L_F_G,L_F_B FROM eigenschaften JOIN %s ON l_id=v_l_id ORDER BY l_id ASC", polygon);
-    sqlite3_exec(db, sql, sqc_yama2, &tmp_werder_len, &zErrMsg);
+    snprintf(sql, 500, "SELECT L_ID,L_COUNT,L_F_R,L_F_G,L_F_B,L_LON1,L_LON2,L_LAT1,L_LAT2 FROM eigenschaften JOIN %s ON l_id=v_l_id ORDER BY l_id ASC", polygon);
+    sqlite3_exec(db, sql, sqc_yama, &tmp_werder_len, &zErrMsg);
     tmp_yama_len = tmp_werder_len;
 #ifdef __TM__
     clock_gettime(CLOCK_MONOTONIC, &spec2);
-    PRINTF("\r%s\n", sql);
+    //PRINTF("\r%s\n", sql);
     ms = (spec2.tv_sec - spec1.tv_sec) * 1000 + (spec2.tv_nsec - spec1.tv_nsec) * 1e-6;
     PRINTF("\rloadVert TM: %ims\n", ms);
 #endif
     // Eigenschaften Weg
-    snprintf(sql, 500, "SELECT L_COUNT,L_F_R,L_F_G,L_F_B FROM eigenschaften JOIN %s ON l_id=v_l_id ORDER BY l_id ASC", vertex);
-    sqlite3_exec(db, sql, sqc_yama2, &tmp_werder_len, &zErrMsg);
+    snprintf(sql, 500, "SELECT L_ID,L_COUNT,L_F_R,L_F_G,L_F_B,L_LON1,L_LON2,L_LAT1,L_LAT2 FROM eigenschaften JOIN %s ON l_id=v_l_id ORDER BY l_id ASC", vertex);
+    sqlite3_exec(db, sql, sqc_yama, &tmp_werder_len, &zErrMsg);
 #ifdef __TM__
     clock_gettime(CLOCK_MONOTONIC, &spec1);
-    PRINTF("\r%s\n", sql);
+    //PRINTF("\r%s\n", sql);
     ms = (spec1.tv_sec - spec2.tv_sec) * 1000 + (spec1.tv_nsec - spec2.tv_nsec) * 1e-6;
     PRINTF("\rloadVert TM: %ims\n", ms);
 #endif  
     //////////////////////
+    int gef = 0;
 
-    int lk = pthread_mutex_lock(&m_pinto);
-    vert_len = tmp_vert_len;
-    yama_len = tmp_yama_len;
-    werder_len = tmp_werder_len;
-    memcpy(verts, tmp_verts, 3 * vert_len * sizeof (GLfloat));
-    memcpy(yama, tmp_yama, (yama_len + werder_len) * sizeof (T_V_EIGENSCHAFTEN));
-    pthread_mutex_unlock(&m_pinto);
-    PRINTF("\rloadVert: vertex: %i  yama_len: %i  werder_len: %i\n", vert_len, yama_len, werder_len);
+    // flächenindex aufräumen
+#define BR2 (4 * BR + 2)
+    int tmp_lon = (int) floor(lon);
+    int tmp_lat = (int) floor(lat);
+    int p_leer = 0;
+
+    /*for (int a = 0; a < yama_len; a++) {
+        if ((abs(yama[a].lon1 - tmp_lon) + abs(yama[a].lon2 - tmp_lon) + abs(yama[a].lat1 - tmp_lat) + abs(yama[a].lat2 - tmp_lat)) > BR2) {
+            printf("asd: %i\n", abs(yama[a].lon1 - tmp_lon) + abs(yama[a].lon2 - tmp_lon) + abs(yama[a].lat1 - tmp_lat) + abs(yama[a].lat2 - tmp_lat));
+            yama[a].id = INT_MAX;
+            p_leer++;
+        }
+    }
+    PRINTF("\rloadVert yama aufräumen: %i\n", p_leer);
+     */
+    //bubble_sort(yama, yama_len);
+    qsort(yama, yama_len, sizeof (T_V_EIGENSCHAFTEN), cmpfunc);
+    //yama_len -= p_leer;
+
+    // wegeindex aufräumen
+    /*p_leer = 0;
+    for (int a = 0; a < werder_len; a++) {
+        if ((abs(werder[a].lon1 - tmp_lon) + abs(werder[a].lon2 - tmp_lon) + abs(werder[a].lat1 - tmp_lat) + abs(werder[a].lat2 - tmp_lat)) > BR2) {
+            werder[a].id = INT_MAX;
+            p_leer++;
+        }
+    }
+    PRINTF("\rloadVert yama aufräumen: %i\n", p_leer);
+     */
+    //bubble_sort(werder, werder_len);
+    qsort(werder, werder_len, sizeof (T_V_EIGENSCHAFTEN), cmpfunc);
+    //werder_len -= p_leer;
+
+#ifdef __TM__
+    clock_gettime(CLOCK_MONOTONIC, &spec2);
+    ms = (spec2.tv_sec - spec1.tv_sec) * 1000 + (spec2.tv_nsec - spec1.tv_nsec) * 1e-6;
+    PRINTF("\rloadVert TM GB: %ims\n", ms);
+#endif  
+
+    // neue Flächen hinzufügen
+    int asd = 0;
+    for (int a = 0; a < tmp_yama_len; a++) {
+        //gef = linear_suche(yama, yama_len, tmp_yama[a].id);
+        gef = binaere_suche(yama, yama_len, tmp_yama[a].id);
+
+        if (gef == -1) {
+            memcpy(&verts[3 * vert_len], &tmp_verts[3 * tmp_yama[a].index], 3 * tmp_yama[a].len * sizeof (GLfloat));
+            tmp_yama[a].index = vert_len;
+            vert_len += tmp_yama[a].len;
+            memcpy(&yama[yama_len + asd], &tmp_yama[a], sizeof (T_V_EIGENSCHAFTEN));
+            asd++;
+        }
+    }
+    yama_len += asd;
+    asd = 0;
+    for (int a = tmp_yama_len; a < tmp_werder_len; a++) {
+        gef = binaere_suche(werder, werder_len, tmp_yama[a].id);
+
+        if (gef == -1) {
+
+            memcpy(&verts[3 * vert_len], &tmp_verts[3 * tmp_yama[a].index], 3 * tmp_yama[a].len * sizeof (GLfloat));
+            tmp_yama[a].index = vert_len;
+            vert_len += tmp_yama[a].len;
+            memcpy(&werder[werder_len + asd], &tmp_yama[a], sizeof (T_V_EIGENSCHAFTEN));
+            asd++;
+        }
+    }
+    werder_len += asd;
+#ifdef __TM__
+    clock_gettime(CLOCK_MONOTONIC, &spec1);
+    ms = (spec1.tv_sec - spec2.tv_sec) * 1000 + (spec1.tv_nsec - spec2.tv_nsec) * 1e-6;
+    PRINTF("\rloadVert TM CP: %ims\n", ms);
+#endif     
+    PRINTF("\rloadVert       : %f, %f\n", lon, lat);
+    PRINTF("\rloadVert sqlite: vertex: %i  yama_len: %i  werder_len: %i\n", tmp_vert_len, tmp_yama_len, tmp_werder_len - tmp_yama_len);
+    PRINTF("\rloadVert    ram: vertex: %i  yama_len: %i  werder_len: %i\n", vert_len, yama_len, werder_len);
+    PRINTF("\r###############################################################\n");
+    /*
+       int lk = pthread_mutex_lock(&m_pinto);
+       vert_len = tmp_vert_len;
+       yama_len = tmp_yama_len;
+       werder_len = tmp_werder_len - tmp_yama_len;
+       memcpy(verts, tmp_verts, 3 * vert_len * sizeof (GLfloat));
+       memcpy(yama, tmp_yama, yama_len * sizeof (T_V_EIGENSCHAFTEN));
+       memcpy(werder, &tmp_yama[yama_len], werder_len * sizeof (T_V_EIGENSCHAFTEN));
+       pthread_mutex_unlock(&m_pinto);
+     */
+    //if (memcmp(verts, test_verts, sizeof (float)*3 * tmp_vert_len) != 0) {
+    //  printf("verts\n");
+    /*for (int n = 0; n < 3 * tmp_vert_len; n++) {
+        if (verts[n] != test_verts[n]) {
+            printf("verts: %i\n", n);
+        }
+    }*/
+    //}
+    /*
+    if (memcmp(yama, test_yama, sizeof (T_V_EIGENSCHAFTEN) * tmp_yama_len) != 0)
+        printf("yama\n");
+    if (memcmp(werder, test_werder, sizeof (T_V_EIGENSCHAFTEN) * (tmp_werder_len - tmp_yama_len)) != 0)
+        printf("werder\n");
+     */
+    /*FILE *array;
+    array = fopen("/home/florian/asd", "w+");
+    fwrite(yama, sizeof (yama), 1, array);
+    fclose(array);*/
 }
 
-void setPOS(ESContext *esContext) {
+void setPOS(ESContext * esContext) {
+
     POS_T *posData = esContext->posData;
 
     pow2Z = pow(2.0, *ZOOM);
@@ -894,7 +1313,7 @@ void setPOS(ESContext *esContext) {
 }
 
 void * foss(void *esContext) {
-    //POS_T *posData = ((ESContext*) esContext)->posData;
+    POS_T *posData = ((ESContext*) esContext)->posData;
     //GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     time_t t;
@@ -902,28 +1321,55 @@ void * foss(void *esContext) {
 
 #ifdef __RASPI__
     int gpio = -1;
-    gpio_unexport(GPIO_PIN);
-    gpio_export(GPIO_PIN);
+    gpio_lcd_init();
     bl_write(BL_ON);
 #endif
 
     while (1) {
-#ifdef __RASPI__
-        gpio = gpio_read(GPIO_PIN);
+        memset(line1_str, 32, 20);
+        memset(line2_str, 32, 20);
 
-        if (gpio == GPIO_HIGH) {
+        t = time(NULL);
+        tm = *localtime(&t);
+        strftime(line1_str, 21, "%R     %e.%m.%Y", &tm);
+
+        snprintf(line2_str, 21, "U: %.2fV", posData->obd_volt);
+
+#ifdef __RASPI__
+        //gpio = gpio_read(GPIO_PIN);
+
+        /*if (gpio == GPIO_HIGH) {
             bl_write(BL_OFF);
             ShutDown(1);
         } else
             bl_write(BL_ON);
+         */
+        gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+        for (int a = 0; a < 20; a++) {
+            gpio_lcd_send_byte(line1_str[a], GPIO_HIGH);
+        }
+        gpio_lcd_send_byte(LCD_LINE_2, GPIO_LOW);
+        for (int a = 0; a < 20; a++) {
+            gpio_lcd_send_byte(line2_str[a], GPIO_HIGH);
+        }
 #endif
-        t = time(NULL);
-        tm = *localtime(&t);
-        strftime(time_str, 50, "%R", &tm);
-
         usleep(500000);
+
     }
     return NULL;
+}
+
+void * deta(void *esContext) {
+    POS_T *posData = ((ESContext*) esContext)->posData;
+    UserData *userData = ((ESContext*) esContext)->userData;
+
+    while (1) {
+
+        loadVert(posData->g_x, posData->g_y, BR);
+        new_tex = 1;
+        sleep(5);
+        //posData->v = 60.0f;
+    }
 }
 
 void * jolla(void *esContext) {
@@ -1067,9 +1513,16 @@ void * pinto(void *esContext) {
 
 #ifdef __OBD__
         if (obd_serial != -1) {
-            obdstatus = getobdvalue(obd_serial, cmdid, &tmp_val, numbytes, conv);
+            //Engine Coolant Temperature
+            obdstatus = getobdvalue(obd_serial, 5, &tmp_val, numbytes, conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_speed = tmp_val;
+            } else {
+                printf("OBD: fehler: \n");
+            }
+            obdstatus = getobdvalue(obd_serial, 0x42, &tmp_val, numbytes, conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_volt = tmp_val;
             } else {
                 printf("OBD: fehler: \n");
             }
@@ -1137,11 +1590,11 @@ void * pinto(void *esContext) {
         }
 #endif
         //printf("%f\n",posData->g_y);
-        if (fabs(posData->g_y - posData->gpu_t_y) > 1.0f || fabs(posData->g_x - posData->gpu_t_x) > 1.0f) {
+        /*if (fabs(posData->g_y - posData->gpu_t_y) > 1.0f || fabs(posData->g_x - posData->gpu_t_x) > 1.0f) {
             posData->gpu_t_x = (GLuint) floor(posData->g_x);
             posData->gpu_t_y = (GLuint) floor(posData->g_y);
-            loadVert(posData->g_x, posData->g_y);
-        }
+            loadVert(posData->g_x, posData->g_y, BR);
+        }*/
 
         fwrite(&posData->gps_latitude, sizeof (double), 1, gps_out);
         fwrite(&posData->gps_longitude, sizeof (double), 1, gps_out);
@@ -1167,18 +1620,20 @@ void * pinto(void *esContext) {
     return NULL;
 }
 
-void esMainLoop(ESContext *esContext) {
+void esMainLoop(ESContext * esContext) {
     struct timeval t1, t2;
     struct timezone tz;
     float deltatime;
     float totaltime = 0.0f;
     unsigned int frames = 0;
-    unsigned int us = 30000;
-#ifdef __TM__
+    unsigned int us = 10000;
+
     gettimeofday(&t1, &tz);
+#ifdef __TM__
     struct timespec spec1, spec2;
     unsigned int ms_min = 4294967295, ms_max = 0, ms, ms_avg = 0;
 #endif
+
     while (userInterrupt(esContext) == GL_FALSE) {
         //while (1) {
         gettimeofday(&t2, &tz);
@@ -1189,6 +1644,7 @@ void esMainLoop(ESContext *esContext) {
 #endif   
         Update(esContext, deltatime);
         eglSwapBuffers(esContext->eglDisplay, esContext->eglSurface);
+
 #ifdef __TM__
         clock_gettime(CLOCK_MONOTONIC, &spec2);
 
@@ -1199,15 +1655,14 @@ void esMainLoop(ESContext *esContext) {
             ms_min = ms;
         if (ms > ms_max)
             ms_max = ms;
-#endif
-        totaltime += deltatime / 1000.0;
+
+        totaltime += deltatime / 1000.0f;
         frames++;
 
-        //PRINTF("%i\n", ms_max);
         if (totaltime > 4.0f) {
-#ifdef __TM__
+
             PRINTF("\rFPS: %3.1f FRAMETIME: %i %4.1f %i  us: %u\n", frames / totaltime, ms_min, (float) ms_avg / frames, ms_max, us);
-#endif
+
             /*if ((frames / totaltime) > 30.0) {
                 us += 1000;
             } else {
@@ -1216,13 +1671,14 @@ void esMainLoop(ESContext *esContext) {
 
             totaltime -= 4.0f;
             frames = 0;
-#ifdef __TM__
+
             ms_avg = 0;
             ms_min = 4294967295;
             ms_max = 0;
-#endif
+
         }
-        usleep(us);
+#endif
+        //usleep(us);
     }
 }
 
@@ -1235,6 +1691,7 @@ static int sqc_vertex(void *NotUsed, int argc, char **argv, char **azColName) {
 
     return 0;
 }
+
 /*
 static int sqc_vertex2(void *NotUsed, int argc, char **argv, char **azColName) {
     tmp_verts_2[6 * tmp_vert_len] = atoi(argv[0]);
@@ -1248,12 +1705,34 @@ static int sqc_vertex2(void *NotUsed, int argc, char **argv, char **azColName) {
 
     return 0;
 }*/
+static int sqc_yama(void *a, int argc, char **argv, char **azColName) {
+    tmp_yama[*((int*) a)].id = atoi(argv[0]);
+    tmp_yama[*((int*) a)].len = atoi(argv[1]);
+    tmp_yama[*((int*) a)].r = atof(argv[2]);
+    tmp_yama[*((int*) a)].g = atof(argv[3]);
+    tmp_yama[*((int*) a)].b = atof(argv[4]);
+    tmp_yama[*((int*) a)].lon1 = atoi(argv[5]);
+    tmp_yama[*((int*) a)].lon2 = atoi(argv[6]);
+    tmp_yama[*((int*) a)].lat1 = atoi(argv[7]);
+    tmp_yama[*((int*) a)].lat2 = atoi(argv[8]);
+
+    tmp_yama[*((int*) a)].index = sqc_tmp;
+    sqc_tmp += tmp_yama[*((int*) a)].len;
+
+    (*((int*) a))++;
+
+    return 0;
+}
 
 static int sqc_yama2(void *a, int argc, char **argv, char **azColName) {
-    tmp_yama[*((int*) a)].len = atoi(argv[0]);
-    tmp_yama[*((int*) a)].r = atof(argv[1]);
-    tmp_yama[*((int*) a)].g = atof(argv[2]);
-    tmp_yama[*((int*) a)].b = atof(argv[3]);
+    tmp_yama[*((int*) a)].id = atoi(argv[0]);
+    tmp_yama[*((int*) a)].len = atoi(argv[1]);
+    tmp_yama[*((int*) a)].r = atof(argv[2]);
+    tmp_yama[*((int*) a)].g = atof(argv[3]);
+    tmp_yama[*((int*) a)].b = atof(argv[4]);
+
+    tmp_yama[*((int*) a)].index = sqc_tmp;
+    sqc_tmp += tmp_yama[*((int*) a)].len;
 
     (*((int*) a))++;
 
@@ -1269,6 +1748,7 @@ ESContext esContext;
 
 void ShutDown(int signum) {
     //void sigfunc(int sig) 
+
     UserData *userData = esContext.userData;
     POS_T *posData = esContext.posData;
 
@@ -1282,7 +1762,7 @@ void ShutDown(int signum) {
     sqlite3_close(db);
 
 #ifdef __RASPI__
-    gpio_unexport(GPIO_PIN);
+    //gpio_unexport(LCD_BUS, 6);
     bl_write(BL_OFF);
 #endif
 
@@ -1301,7 +1781,7 @@ int main(int argc, char *argv[]) {
     POS_T posData;
     GPS_T gpsData;
 
-    pthread_t thread_id1, thread_id2;
+    pthread_t thread_id1, thread_id2, thread_id3, thread_id4;
     pthread_mutex_init(&m_pinto, NULL);
 
     signal(SIGTERM, ShutDown);
@@ -1316,6 +1796,7 @@ int main(int argc, char *argv[]) {
 
 #ifdef __RASPI__
     const char *homedir = "/home/pi";
+    bl_write(BL_ON);
 #else
     const char *homedir = getenv("HOME");
 #endif
@@ -1334,11 +1815,8 @@ int main(int argc, char *argv[]) {
 #endif
 
     ZOOM = &ZOOM_S[0];
-#ifdef __565__
+
     userData.element4Pixel = 1;
-#else
-    userData.element4Pixel = 3;
-#endif
     userData.imgrow_sz = IMAGE_SIZE * userData.element4Pixel;
     userData.image_sz = IMAGE_SIZE * userData.imgrow_sz;
     userData.tiles = userData.r_height * userData.r_width;
@@ -1371,12 +1849,15 @@ int main(int argc, char *argv[]) {
 
     rad2deg = M_PI / 180.0f;
 
-    posData.gps_latitude = 52.0741805;
-    posData.gps_longitude = 11.7785122;
+    //posData.gps_latitude = 52.0741805;
+    //posData.gps_longitude = 11.7785122;
     //posData.gps_latitude = 52.1317318;
     //posData.gps_longitude = 11.6530552;
+    posData.gps_latitude = 52.1317115;
+    posData.gps_longitude = 11.6530537;
     posData.gps_altitude = 0.0;
     posData.obd_speed = 0.0;
+    posData.obd_volt = 12.4;
     posData.angle = 0.0f;
     posData.v = 0.0;
 
@@ -1385,15 +1866,26 @@ int main(int argc, char *argv[]) {
     posData.gpu_t_x = (GLuint) floor(posData.g_x);
     posData.gpu_t_y = (GLuint) floor(posData.g_y);
 
+#define SZ 4096
+#define PAGES 8192
     strncpy(filename, homedir, 50);
     char *db_file = strncat(filename, "/sit2d_3.db", 50);
+    double *sqlite_cache = (double*) malloc(SZ * PAGES);
+    assert(sqlite3_config(SQLITE_CONFIG_PAGECACHE, &sqlite_cache[0], SZ, PAGES) == SQLITE_OK);
+    sqlite3_initialize();
     assert(sqlite3_open_v2(db_file, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
-    loadVert(posData.g_x, posData.g_y);
+
+    vert_len = 0;
+    yama_len = 0;
+    werder_len = 0;
+    loadVert(floor(posData.g_x), floor(posData.g_y), BR);
+    new_tex = 1;
 
     esMatrixLoadIdentity(&perspective);
+    esMatrixLoadIdentity(&mvpTex);
     //esPerspective( &perspective, 60.0f, (GLfloat) esContext->width / (GLfloat) esContext->height, 1.0f, 100.0f );
     esOrtho(&perspective, -V_Y, V_Y, -V_Y, V_Y, -50, 50);
-
+    esOrtho(&mvpTex, -BR, BR, -BR, BR, -50, 50);
     char buf[50];
 
     snprintf(buf, 50, "%s/RES/minus.tga", homedir);
@@ -1408,25 +1900,29 @@ int main(int argc, char *argv[]) {
     //load_tex_images(&esContext);
     assert(Init(&esContext));
     //upload_tex(&esContext);
-    PRINTF("\r%s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
+    //loadVert(posData.g_x, posData.g_y, BR);
+    //glBindBuffer(GL_ARRAY_BUFFER, userData.buffindex[BUFF_INDEX_MAP]);
+    //glBufferData(GL_ARRAY_BUFFER, 12 * vert_len, verts, GL_DYNAMIC_DRAW);
 #ifndef __RASPI__
     esRegisterKeyFunc(&esContext, Key);
 #endif
     PRINTF("\rinit abgeschlossen\n");
 
-    intro(&esContext);
+    //intro(&esContext);
     glClearColor(1.0f, 1.0f, 0.0f, 1.0f);
 
-    //pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
+    pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
     //pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
     //pthread_create(&thread_id3, NULL, &jolla, (void*) &esContext);
+    //pthread_create(&thread_id4, NULL, &deta, (void*) &esContext);
 
     esMainLoop(&esContext);
 
     pthread_join(thread_id1, NULL);
     pthread_join(thread_id2, NULL);
-    //pthread_join(thread_id3, NULL);
+    pthread_join(thread_id3, NULL);
+    pthread_join(thread_id4, NULL);
 
     //ShutDown(&esContext);
 
