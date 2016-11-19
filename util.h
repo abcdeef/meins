@@ -4,7 +4,7 @@
 #define IMAGE_SIZE 256
 
 #define SCALE 1
-#define V_Y 1.5f
+//#define ORTHO 1.5f
 #define V_Z 1.2f
 #define P 0.03f
 
