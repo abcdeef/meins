@@ -1,15 +1,33 @@
 #include "gpio.h"
 
+
+int mem_fd;
+void *gpio_map;
+volatile unsigned int *gpio;
+#define BLOCK_SIZE (4*1024)
+#define BCM2708_PERI_BASE        0x3F000000
+#define GPIO_BASE  (BCM2708_PERI_BASE + 0x200000) /* GPIO controller */
+#define INP_GPIO(g) *(gpio+((g)/10)) &= ~(7<<(((g)%10)*3))
+#define OUT_GPIO(g) *(gpio+((g)/10)) |=  (1<<(((g)%10)*3))
+#define GPIO_SET *(gpio+7)  // sets   bits which are 1 ignores bits which are 0
+#define GPIO_CLR *(gpio+10) // clears bits which are 1 ignores bits which are 0
+
+
 #define GPIO_RS 0
 #define GPIO_E  1
-#define GPIO_DATA4 2
-#define GPIO_DATA5 3
-#define GPIO_DATA6 4
-#define GPIO_DATA7 5
+#define GPIO_RW 2
+#define GPIO_DATA0 3
+#define GPIO_DATA1 4
+#define GPIO_DATA2 5
+#define GPIO_DATA3 6
+#define GPIO_DATA4 7
+#define GPIO_DATA5 8
+#define GPIO_DATA6 9
+#define GPIO_DATA7 10
 
-/* RS, E, DATA4, DATA5, DATA6, DATA7 */
-int LCD_BUS[6] = {4, 17, 18, 22, 23, 24};
-int GPIO_FD[6];
+/* RS, E, RW, DATA0, DATA1, DATA2, DATA3, DATA4, DATA5, DATA6, DATA7 */
+int LCD_BUS[11] = {20, 19, 25, 24, 16, 23, 13, 22, 12, 27, 6};
+//int GPIO_FD[11];
 
 int bl_write(char *value) {
     int fd;
@@ -31,154 +49,6 @@ int bl_write(char *value) {
     return (0);
 }
 
-void gpio_lcd_init() {
-    gpio_unexport(LCD_BUS, 6);
-    gpio_export(LCD_BUS, 6);
-    for (int n = 0; n < 6; n++)
-        gpio_direction(LCD_BUS[n], GPIO_OUT);
-    gpio_open(LCD_BUS, GPIO_FD, 6);
-
-    gpio_lcd_send_byte(0x33, GPIO_LOW);
-    gpio_lcd_send_byte(0x32, GPIO_LOW);
-    gpio_lcd_send_byte(0x28, GPIO_LOW);
-    gpio_lcd_send_byte(0x0C, GPIO_LOW);
-    gpio_lcd_send_byte(0x06, GPIO_LOW);
-    gpio_lcd_send_byte(0x01, GPIO_LOW);
-}
-
-void gpio_open(int *pins, int *fds, int count) {
-    char path[MAXBUFFER];
-    for (int n = 0; n < count; n++) {
-        snprintf(path, MAXBUFFER, "/sys/class/gpio/gpio%d/value", pins[n]);
-        fds[n] = open(path, O_WRONLY);
-        if (fds[n] < 0) {
-            perror("\rKann auf GPIO nicht schreiben (open)!\n");
-        }
-    }
-}
-
-void gpio_export(int *pins, int count) {
-    char buffer[MAXBUFFER]; /* Output Buffer   */
-    ssize_t bytes; /* Datensatzlaenge */
-    int fd; /* Filedescriptor  */
-    int res; /* Ergebnis von write */
-
-    fd = open("/sys/class/gpio/export", O_WRONLY);
-    if (fd < 0) {
-        perror("\rKann nicht auf export schreiben!\n");
-        return (-1);
-    }
-    for (int n = 0; n < count; n++) {
-        bytes = snprintf(buffer, MAXBUFFER, "%d", pins[n]);
-        res = write(fd, buffer, bytes);
-        if (res < 0) {
-            perror("\rKann Pin nicht aktivieren (write)!\n");
-            return (-1);
-        }
-    }
-    close(fd);
-}
-
-void gpio_unexport(int *pins, int count) {
-    char buffer[MAXBUFFER]; /* Output Buffer   */
-    ssize_t bytes; /* Datensatzlaenge */
-    int fd; /* Filedescriptor  */
-    int res; /* Ergebnis von write */
-
-    fd = open("/sys/class/gpio/unexport", O_WRONLY);
-
-    if (fd < 0) {
-        printf("\rKann nicht auf unexport schreiben!\n");
-        return (-1);
-    }
-
-    for (int n = 0; n < count; n++) {
-        bytes = snprintf(buffer, MAXBUFFER, "%d", pins[n]);
-        res = write(fd, buffer, bytes);
-        if (res < 0) {
-            perror("\rKann Pin nicht deaktivieren (write)!\n");
-            return (-1);
-        }
-    }
-    close(fd);
-}
-
-/* Datenrichtung GPIO-Pin festlegen
- * Schreiben Pinnummer nach /sys/class/gpioXX/direction
- * Richtung dir: 0 = Lesen, 1 = Schreiben
- * Ergebnis: 0 = O.K., -1 = Fehler
- */
-int gpio_direction(int pin, int dir) {
-    char path[MAXBUFFER]; /* Buffer fuer Pfad   */
-    int fd; /* Filedescriptor     */
-    int res; /* Ergebnis von write */
-
-    snprintf(path, MAXBUFFER, "/sys/class/gpio/gpio%d/direction", pin);
-    fd = open(path, O_WRONLY);
-    if (fd < 0) {
-        perror("\rKann Datenrichtung nicht setzen (open)!\n");
-        return (-1);
-    }
-    switch (dir) {
-        case GPIO_IN: res = write(fd, "in", 2);
-            break;
-        case GPIO_OUT: res = write(fd, "out", 3);
-            break;
-    }
-    if (res < 0) {
-        perror("\rKann Datenrichtung nicht setzen (write)!\n");
-        return (-1);
-    }
-    close(fd);
-    return (0);
-}
-
-/* vom GPIO-Pin lesen
- * Ergebnis: -1 = Fehler, 0/1 = Portstatus
- */
-int gpio_read(int pin) {
-    char path[MAXBUFFER]; /* Buffer fuer Pfad     */
-    int fd; /* Filedescriptor       */
-    char result[MAXBUFFER] = {0}; /* Buffer fuer Ergebnis */
-
-    snprintf(path, MAXBUFFER, "/sys/class/gpio/gpio%d/value", pin);
-    fd = open(path, O_RDONLY);
-    if (fd < 0) {
-        perror("\rKann vom GPIO nicht lesen (open)!\n");
-        return (-1);
-    }
-    if (read(fd, result, 3) < 0) {
-        perror("\rKann vom GPIO nicht lesen (read)!\n");
-        return (-1);
-    }
-    close(fd);
-    return (atoi(result));
-}
-
-/* auf GPIO schreiben
- * Ergebnis: -1 = Fehler, 0 = O.K.
- */
-int gpio_write(int pin, char *value) {
-    char path[MAXBUFFER]; /* Buffer fuer Pfad   */
-    int fd; /* Filedescriptor     */
-    int res; /* Ergebnis von write */
-
-    snprintf(path, MAXBUFFER, "/sys/class/gpio/gpio%d/value", pin);
-    fd = open(path, O_WRONLY);
-    if (fd < 0) {
-        perror("\rKann auf GPIO nicht schreiben (open)!\n");
-        return (-1);
-    }
-    res = write(fd, value, 1);
-
-    if (res < 0) {
-        perror("\rKann auf GPIO nicht schreiben (write)!\n");
-        return (-1);
-    }
-    close(fd);
-    return (0);
-}
-
 /*
  * Delay (warten), Zeitangabe in Millisekunden
  */
@@ -191,45 +61,84 @@ void delay(unsigned long millis) {
     int err = nanosleep(&ts, (struct timespec *) NULL);
 }
 
+void gpio_init() {
+    if ((mem_fd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
+        printf("can't open /dev/mem \n");
+        exit(-1);
+    }
+
+    gpio_map = mmap(
+            NULL, //Any adddress in our space will do
+            BLOCK_SIZE, //Map length
+            PROT_READ | PROT_WRITE, // Enable reading & writting to mapped memory
+            MAP_SHARED, //Shared with other processes
+            mem_fd, //File to map
+            GPIO_BASE //Offset to GPIO peripheral
+            );
+
+    close(mem_fd); //No need to keep mem_fd open after mmap
+
+    if (gpio_map == MAP_FAILED) {
+        printf("mmap error %d\n", (int) gpio_map); //errno also set!
+        exit(-1);
+    }
+
+    gpio = (volatile unsigned *) gpio_map;
+}
+
 void gpio_lcd_send_byte(char bits, char *mode) {
-    write(GPIO_FD[GPIO_RS], mode, 1);
-    write(GPIO_FD[GPIO_DATA4], GPIO_LOW, 1);
-    write(GPIO_FD[GPIO_DATA5], GPIO_LOW, 1);
-    write(GPIO_FD[GPIO_DATA6], GPIO_LOW, 1);
-    write(GPIO_FD[GPIO_DATA7], GPIO_LOW, 1);
+    if (*mode == 48)
+        GPIO_CLR = 1 << LCD_BUS[GPIO_RS];
+    else
+        GPIO_SET = 1 << LCD_BUS[GPIO_RS];
 
-    if ((bits & 0x10) == 0x10)
-        write(GPIO_FD[GPIO_DATA4], GPIO_HIGH, 1);
-    if ((bits & 0x20) == 0x20)
-        write(GPIO_FD[GPIO_DATA5], GPIO_HIGH, 1);
-    if ((bits & 0x40) == 0x40)
-        write(GPIO_FD[GPIO_DATA6], GPIO_HIGH, 1);
-    if ((bits & 0x80) == 0x80)
-        write(GPIO_FD[GPIO_DATA7], GPIO_HIGH, 1);
-
-    delay(E_DELAY);
-    write(GPIO_FD[GPIO_E], GPIO_HIGH, 1);
-    delay(E_PULSE);
-    write(GPIO_FD[GPIO_E], GPIO_LOW, 1);
-    delay(E_DELAY);
-
-    write(GPIO_FD[GPIO_DATA4], GPIO_LOW, 1);
-    write(GPIO_FD[GPIO_DATA5], GPIO_LOW, 1);
-    write(GPIO_FD[GPIO_DATA6], GPIO_LOW, 1);
-    write(GPIO_FD[GPIO_DATA7], GPIO_LOW, 1);
+    GPIO_CLR = 1 << LCD_BUS[GPIO_RW];
+    GPIO_CLR = 1 << LCD_BUS[GPIO_DATA0];
+    GPIO_CLR = 1 << LCD_BUS[GPIO_DATA1];
+    GPIO_CLR = 1 << LCD_BUS[GPIO_DATA2];
+    GPIO_CLR = 1 << LCD_BUS[GPIO_DATA3];
+    GPIO_CLR = 1 << LCD_BUS[GPIO_DATA4];
+    GPIO_CLR = 1 << LCD_BUS[GPIO_DATA5];
+    GPIO_CLR = 1 << LCD_BUS[GPIO_DATA6];
+    GPIO_CLR = 1 << LCD_BUS[GPIO_DATA7];
 
     if ((bits & 0x01) == 0x01)
-        write(GPIO_FD[GPIO_DATA4], GPIO_HIGH, 1);
+        GPIO_SET = 1 << LCD_BUS[GPIO_DATA0];
     if ((bits & 0x02) == 0x02)
-        write(GPIO_FD[GPIO_DATA5], GPIO_HIGH, 1);
+        GPIO_SET = 1 << LCD_BUS[GPIO_DATA1];
     if ((bits & 0x04) == 0x04)
-        write(GPIO_FD[GPIO_DATA6], GPIO_HIGH, 1);
+        GPIO_SET = 1 << LCD_BUS[GPIO_DATA2];
     if ((bits & 0x08) == 0x08)
-        write(GPIO_FD[GPIO_DATA7], GPIO_HIGH, 1);
+        GPIO_SET = 1 << LCD_BUS[GPIO_DATA3];
+    if ((bits & 0x10) == 0x10)
+        GPIO_SET = 1 << LCD_BUS[GPIO_DATA4];
+    if ((bits & 0x20) == 0x20)
+        GPIO_SET = 1 << LCD_BUS[GPIO_DATA5];
+    if ((bits & 0x40) == 0x40)
+        GPIO_SET = 1 << LCD_BUS[GPIO_DATA6];
+    if ((bits & 0x80) == 0x80)
+        GPIO_SET = 1 << LCD_BUS[GPIO_DATA7];
 
     delay(E_DELAY);
-    write(GPIO_FD[GPIO_E], GPIO_HIGH, 1);
+    GPIO_SET = 1 << LCD_BUS[GPIO_E];
     delay(E_PULSE);
-    write(GPIO_FD[GPIO_E], GPIO_LOW, 1);
+    GPIO_CLR = 1 << LCD_BUS[GPIO_E];
     delay(E_DELAY);
+}
+
+void gpio_lcd_init() {
+    gpio_init();
+
+    for (int n = 0; n < 11; n++) {
+        INP_GPIO(LCD_BUS[n]);
+        OUT_GPIO(LCD_BUS[n]);
+    }
+
+    gpio_lcd_send_byte(0x39, GPIO_LOW);
+    gpio_lcd_send_byte(0x08, GPIO_LOW);
+    gpio_lcd_send_byte(0x06, GPIO_LOW);
+    gpio_lcd_send_byte(0x17, GPIO_LOW);
+    gpio_lcd_send_byte(0x01, GPIO_LOW);
+    gpio_lcd_send_byte(0x02, GPIO_LOW);
+    gpio_lcd_send_byte(0x0C, GPIO_LOW);
 }
