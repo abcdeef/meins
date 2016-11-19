@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <math.h>
+#include <locale.h>
 #include <sqlite3.h>
 #include <stdbool.h>
 #include <unistd.h>
@@ -34,14 +35,21 @@
 #define RSIZE 3
 #endif
 
-#define BUFFER_OFFSET(i) ((char *) NULL + (4*i))
+#define BUFFER_OFFSET(i) ((void *) NULL + (2*i))
 #define ROUND(x) roundf(x*10)/10
 #define MEM(x) (int)(x * 256 )
 #define PRINTF(...) fprintf(sout,__VA_ARGS__);fprintf(stdout,__VA_ARGS__)
+#define PRINTGLERROR printOglError(__FILE__, __LINE__);
+#ifdef __TM__
+#define TM(START,END,...) clock_gettime(CLOCK_MONOTONIC, &END);ms = (END.tv_sec - START.tv_sec) * 1000 + (END.tv_nsec - START.tv_nsec) * 1e-6;printf("\r%ims\n",ms);
+#else
+#define TM(START, END,...) 
+#endif
 
 #define BUFF_INDEX_GUI 0
 #define BUFF_INDEX_TXT 1
-#define BUFF_INDEX_MAP 2
+#define BUFFER_VERTS 2
+#define BUFFER_INDEX 3
 
 #define FBO_WIDTH 1024
 #define FBO_HEIGHT 1024
@@ -50,7 +58,6 @@ FILE *gps_out, *gps_in;
 FILE *sout;
 
 float trans_x = 0.0f, trans_y = 0.0f, trans_z = 0.0f, orto1 = 0.0f, orto2 = 0.0f, orto3 = 0.0f, orto4 = 0.0f;
-
 
 char line1_str[21];
 char line2_str[21];
@@ -62,30 +69,42 @@ typedef struct {
     int index;
     GLsizei len;
     GLfloat r, g, b;
-    int lon1, lon2, lat1, lat2;
-} T_V_EIGENSCHAFTEN;
+    int osm_id;
+} T_V_E;
 
 typedef struct {
-    int id;
-    int index;
     GLsizei len;
-    unsigned short r, g, b;
-} T_V_EIGENSCHAFTEN2;
-
-#define Y_LEN 20000
-static T_V_EIGENSCHAFTEN yama[Y_LEN];
-static T_V_EIGENSCHAFTEN werder[Y_LEN];
-static T_V_EIGENSCHAFTEN tmp_yama[Y_LEN];
-
-unsigned int Indices_len;
-GLuint *Indices;
-
-int vert_len, tmp_vert_len, yama_len, tmp_yama_len, werder_len, tmp_werder_len;
+    GLfloat r, g, b;
+    unsigned short *index;
+} T_V_F;
 
 #define BR 8.0
-#define V_LEN 200000
-static GLfloat verts[V_LEN] = {0.0f};
+//float BR = 0.5f;
+float ORTHO = 2.0f;
+
+#define Y_LEN 10000
+#define V_LEN 65536
+static GLfloat verts[3 * V_LEN] = {0.0f};
+unsigned short verts_len = 0;
+////////////////////////////////
+static T_V_E yama[Y_LEN];
+static unsigned short yama_index[V_LEN];
+unsigned short yama_len = 0, yama_index_len = 0;
+/////////////////////////
+static T_V_E werder[Y_LEN];
+unsigned short werder_len = 0;
+/////////////////////////
 static GLfloat tmp_verts[V_LEN] = {0.0f};
+static T_V_E tmp_yama[Y_LEN];
+unsigned short tmp_vert_len, tmp_yama_len, tmp_werder_len, tmp_reis_len;
+///////////////////////////////
+T_V_E farbe[20];
+unsigned short farbe_yama_len = 0, farbe_reis_len = 0, farbe_werder_len = 0;
+;
+////////////////////
+static T_V_E reis[Y_LEN];
+static unsigned short reis_index[V_LEN];
+unsigned short reis_len = 0, reis_index_len = 0;
 
 int sqc_tmp;
 
@@ -93,8 +112,8 @@ void setPOS(ESContext *esContext);
 static int sqc_yama(void *a, int argc, char **argv, char **azColName);
 static int sqc_yama2(void *a, int argc, char **argv, char **azColName);
 static int sqc_vertex(void *NotUsed, int argc, char **argv, char **azColName);
-//static int sqc_vertex2(void *NotUsed, int argc, char **argv, char **azColName);
 static int sqc_count(void *out_var, int argc, char **argv, char **azColName);
+static int sqc_farbe(void *a, int argc, char **argv, char **azColName);
 
 void printM4(ESMatrix *wg);
 void ShutDown(int signum);
@@ -104,8 +123,8 @@ void ShutDown(int signum);
 double mf;
 double pow2Z;
 float rad2deg;
-GLubyte ZOOM_S[] = {18, 17, 16, 15, 14, 12, 10, 8};
-GLubyte *ZOOM;
+//GLubyte ZOOM_S[] = {18, 17, 16, 15, 14, 12, 10, 8};
+//GLubyte *ZOOM;
 
 int dx = 0, dy = 0, m_n, m_m, p_n, p_m;
 GLuint *tmp;
@@ -117,6 +136,7 @@ float gps_status[3] = {1.0f, 0.0f, 0.0f};
 
 unsigned short new_tex = 0;
 pthread_mutex_t m_pinto = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t m_deto = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
     GLuint programMap;
@@ -216,6 +236,37 @@ typedef struct {
 
     float obd_volt;
 } POS_T;
+
+int printOglError(char *file, int line) {
+    //
+    // Returns 1 if an OpenGL error occurred, 0 otherwise.
+    //
+    GLenum glErr;
+    int retCode = 0;
+
+    glErr = glGetError();
+    while (glErr != GL_NO_ERROR) {
+        printf("\rglError in file %s @ line %i - ", file, line);
+
+        switch (glErr) {
+            case GL_INVALID_OPERATION: printf("INVALID_OPERATION");
+                break;
+            case GL_INVALID_ENUM: printf("INVALID_ENUM");
+                break;
+            case GL_INVALID_VALUE: printf("INVALID_VALUE");
+                break;
+            case GL_OUT_OF_MEMORY: printf("OUT_OF_MEMORY");
+                break;
+            case GL_INVALID_FRAMEBUFFER_OPERATION: printf("INVALID_FRAMEBUFFER_OPERATION");
+                break;
+            default: printf("else");
+        }
+        printf("\n");
+        retCode = 1;
+        glErr = glGetError();
+    }
+    return retCode;
+}
 
 GLboolean GenMipMap2D(GLubyte *src, GLubyte **dst, int srcWidth, int srcHeight, int *dstWidth, int *dstHeight) {
     int x, y;
@@ -513,8 +564,12 @@ int Init(ESContext *esContext) {
     // NICHT LÖSCHEN! der raspi  brauch das
     for (int fg = 0; fg < 20; fg++)
         glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[fg]);
+
     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
     glBufferData(GL_ARRAY_BUFFER, sizeof (buttons), buttons, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX]);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
     // Generate the vertex data
 #ifdef __NEW_MESH__
@@ -626,7 +681,7 @@ int Init(ESContext *esContext) {
 #endif
 
     glViewport(0, -160, 800, 800);
-
+    PRINTGLERROR
     return GL_TRUE;
 }
 
@@ -697,25 +752,25 @@ void intro(ESContext *esContext) {
     usleep(800000);
 }
 
-/*static void renderMap(void) {
-    glUniformMatrix4fv(userData->mvpLocMap, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
-    glUniform2i(userData->offsetLLocMap, posData->t_x, posData->t_y);
-    glUniform2i(userData->offsetMLocMap, posData->m_x, posData->m_y);
-    glVertexAttribPointer(userData->positionLocMap, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
-
-    // Flächen
-    for (m_n = 0; m_n < yama_len; m_n++) {
-        glUniform3f(userData->colorLocMap, yama[m_n].r, yama[m_n].g, yama[m_n].b);
-        glDrawArrays(GL_TRIANGLE_FAN, yama[m_n].index, yama[m_n].len);
+void map(UserData *userData) {
+    // Residential
+    for (unsigned short m_n = 0; m_n < farbe_reis_len; m_n++) {
+        glUniform3f(userData->colorLocMap, farbe[m_n].r, farbe[m_n].g, farbe[m_n].b);
+        glDrawElements(GL_TRIANGLES, farbe[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe[m_n].index));
     }
-
+    // Flächen
+    for (unsigned short m_n = farbe_reis_len; m_n < farbe_yama_len; m_n++) {
+        glUniform3f(userData->colorLocMap, farbe[m_n].r, farbe[m_n].g, farbe[m_n].b);
+        glDrawElements(GL_TRIANGLES, farbe[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe[m_n].index));
+    }
     // Wege
     glLineWidth(5.0f);
-    for (m_n = 0; m_n < werder_len; m_n++) {
-        glUniform3f(userData->colorLocMap, werder[m_n].r, werder[m_n].g, werder[m_n].b);
-        glDrawArrays(GL_LINE_STRIP, werder[m_n].index, werder[m_n].len);
+    for (unsigned short m_n = farbe_yama_len; m_n < farbe_werder_len; m_n++) {
+        glUniform3f(userData->colorLocMap, farbe[m_n].r, farbe[m_n].g, farbe[m_n].b);
+        glDrawElements(GL_LINES, farbe[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe[m_n].index));
     }
-}*/
+    PRINTGLERROR
+}
 
 void Update(ESContext *esContext, float deltaTime) {
     UserData *userData = ((ESContext*) esContext)->userData;
@@ -758,135 +813,28 @@ void Update(ESContext *esContext, float deltaTime) {
 
 
     // DRAW
-#ifdef __FBO__
-    //if (new_tex == 1) {
-    glBindFramebuffer(GL_FRAMEBUFFER, userData->FramebufferName);
-    glViewport(0, 0, 480, 480);
-
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    glUseProgram(userData->programFBO);
-    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_MAP]);
-
-    glBufferData(GL_ARRAY_BUFFER, 12 * vert_len, verts, GL_DYNAMIC_DRAW);
-
-    glUniformMatrix4fv(userData->mvpLocFBO, 1, GL_FALSE, (GLfloat*) mvpTex.m);
-    glUniform2i(userData->offsetLLocFBO, posData->t_x, posData->t_y);
-    glVertexAttribPointer(userData->positionLocFBO, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
-
-    // Flächen
-    for (m_n = 0; m_n < yama_len; m_n++) {
-        glUniform3f(userData->colorLocFBO, yama[m_n].r, yama[m_n].g, yama[m_n].b);
-        glDrawArrays(GL_TRIANGLE_FAN, yama[m_n].index, yama[m_n].len);
-    }
-
-    // Wege
-    glLineWidth(5.0f);
-    for (m_n = 0; m_n < werder_len; m_n++) {
-        glUniform3f(userData->colorLocFBO, werder[m_n].r, werder[m_n].g, werder[m_n].b);
-        glDrawArrays(GL_LINE_STRIP, werder[m_n].index, werder[m_n].len);
-    }
-    // Gittenetz
-    glLineWidth(1.0f);
-    for (float col = 1.0f; col < 2.0f * BR; col++) {
-        const GLfloat quadVertices[] = {
-            posData->t_x + col - BR, posData->t_y - BR, 0.0f,
-            posData->t_x + col - BR, posData->t_y + 3.0f, 0.0f
-        };
-        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_TXT]);
-        glBufferData(GL_ARRAY_BUFFER, sizeof (quadVertices), quadVertices, GL_DYNAMIC_DRAW);
-        glVertexAttribPointer(userData->positionLocFBO, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
-        glUniform3f(userData->colorLocFBO, 0.0f, 0.0f, 0.0f);
-        glDrawArrays(GL_LINES, 0, 2);
-    }
-    for (float row = 1.0f; row < 2.0f * BR; row++) {
-        const GLfloat quadVertices[] = {
-            posData->t_x - BR, posData->t_y + row - BR, 0.0f,
-            posData->t_x + BR, posData->t_y + row - BR, 0.0f
-        };
-        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_TXT]);
-        glBufferData(GL_ARRAY_BUFFER, sizeof (quadVertices), quadVertices, GL_DYNAMIC_DRAW);
-        glVertexAttribPointer(userData->positionLocFBO, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
-        glUniform3f(userData->colorLocFBO, 0.0f, 0.0f, 0.0f);
-        glDrawArrays(GL_LINES, 0, 2);
-        //}
-        //
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        new_tex = 0;
-    }
-#else
-
     glClear(GL_COLOR_BUFFER_BIT);
+    glViewport(0, -160, 800, 800);
+
     glUseProgram(userData->programMap);
-    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_MAP]);
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS]);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX]);
+
+    pthread_mutex_lock(&m_deto);
 
     if (new_tex == 1) {
-        glBufferData(GL_ARRAY_BUFFER, 12 * vert_len, verts, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, 12 * verts_len, verts, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, yama_index_len * sizeof (short), yama_index, GL_DYNAMIC_DRAW);
         new_tex = 0;
     }
-    glViewport(0, -160, 800, 800);
 
     glUniformMatrix4fv(userData->mvpLocMap, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
     glUniform2i(userData->offsetLLocMap, posData->t_x, posData->t_y);
     glUniform2i(userData->offsetMLocMap, posData->m_x, posData->m_y);
     glVertexAttribPointer(userData->positionLocMap, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
 
-    // Flächen
-    for (m_n = 0; m_n < yama_len; m_n++) {
-        glUniform3f(userData->colorLocMap, yama[m_n].r, yama[m_n].g, yama[m_n].b);
-        glDrawArrays(GL_TRIANGLE_FAN, yama[m_n].index, yama[m_n].len);
-    }
-
-    // Wege
-    glLineWidth(5.0f);
-    for (m_n = 0; m_n < werder_len; m_n++) {
-        glUniform3f(userData->colorLocMap, werder[m_n].r, werder[m_n].g, werder[m_n].b);
-        glDrawArrays(GL_LINE_STRIP, werder[m_n].index, werder[m_n].len);
-    }
-#endif
-
-#ifdef __FBO__
-    glUseProgram(userData->programTex);
-    glActiveTexture(GL_TEXTURE0);
-    glUniform1i(userData->samplerLocTex, 0);
-
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-
-    GLfloat fgh[] = {
-        posData->t_x - BR, posData->t_y + BR, 0.0f, 0.0f,
-        posData->t_x - BR, posData->t_y - BR, 0.0f, 1.0f,
-        posData->t_x + BR, posData->t_y + BR, 1.0f, 0.0f,
-        posData->t_x + BR, posData->t_y - BR, 1.0f, 1.0f
-    };
-
-    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_TXT]);
-    glBufferData(GL_ARRAY_BUFFER, sizeof (fgh), fgh, GL_DYNAMIC_DRAW);
-
-    glVertexAttribPointer(userData->positionLocTex, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
-    glVertexAttribPointer(userData->texCoordLocTex, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
-    ////////
-    ESMatrix per, model, mvp;
-    esMatrixLoadIdentity(&model);
-    esMatrixLoadIdentity(&per);
-
-    //glViewport(0, -160, 800, 800);
-    glViewport(0, 0, 800, 480);
-    esOrtho(&per, -orto1, orto1, -orto2, orto2, -50, 50);
-    //esRotate(&modelview, posData->angle, 0.0, 0.0, 1.0);
-    esTranslate(&model, trans_x, trans_y, trans_z);
-
-    esMatrixMultiply(&mvp, &model, &per);
-
-    glUniformMatrix4fv(userData->mvpLocTex, 1, GL_FALSE, (GLfloat*) mvp.m);
-    ////////////////////
-    glUniform2i(userData->offsetLLocTex, posData->t_x, posData->t_y);
-    glUniform2i(userData->offsetMLocTex, posData->m_x, posData->m_y);
-    glBindTexture(GL_TEXTURE_2D, userData->renderedTexture);
-
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-#endif
+    map(userData);
+    pthread_mutex_unlock(&m_deto);
 
 
     // GUI
@@ -910,8 +858,8 @@ void Update(ESContext *esContext, float deltaTime) {
 
     // Text
     //renderInt(userData, posData->obd_speed, -1.0f, 0.54f);
-    renderFloat(userData, posData->g_x, -1.0f, 0.54f);
-    renderFloat(userData, posData->g_y, -1.0f, 0.4f);
+    //renderFloat(userData, posData->g_x, -1.0f, 0.54f);
+    //renderFloat(userData, posData->g_y, -1.0f, 0.4f);
 
     // GPS_I
     glUseProgram(userData->programKreis);
@@ -920,86 +868,87 @@ void Update(ESContext *esContext, float deltaTime) {
     glVertexAttribPointer(userData->texCoordLocKreis, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
     glUniform3f(userData->colorLocGPS_I, gps_status[0], gps_status[1], gps_status[2]);
     glDrawArrays(GL_TRIANGLE_STRIP, 15, 4);
-
+    PRINTGLERROR
 }
 
 void Key(ESContext *esContext, unsigned char a, int b, int c) {
     POS_T *posData = esContext->posData;
     uint l = 0;
 
-    printf("%i\n", a);
+    //printf("%i\n", a);
     switch (a) {
-        case 52:
-            trans_x = 0.0f;
-            printf("%f %f %f\n", trans_x, trans_y, trans_z);
-            break;
-        case 53:
-            trans_y = 0.0f;
-            printf("%f %f %f\n", trans_x, trans_y, trans_z);
-            break;
-        case 54:
-            trans_z = 0.0f;
-            printf("%f %f %f\n", trans_x, trans_y, trans_z);
-            break;
-        case 55:
-            trans_x += 0.1f;
-            printf("%f %f %f\n", trans_x, trans_y, trans_z);
-            break;
-        case 56:
-            trans_y += 0.1f;
-            printf("%f %f %f\n", trans_x, trans_y, trans_z);
-            break;
-        case 57:
-            trans_z += 0.1f;
-            printf("%f %f %f\n", trans_x, trans_y, trans_z);
-            break;
-        case 49:
-            trans_x -= 0.1f;
-            printf("%f %f %f\n", trans_x, trans_y, trans_z);
-            break;
-        case 50:
-            trans_y -= 0.1f;
-            printf("%f %f %f\n", trans_x, trans_y, trans_z);
-            break;
-        case 51:
-            trans_z -= 0.1f;
-            printf("%f %f %f\n", trans_x, trans_y, trans_z);
-            break;
-        case 47:
-            orto1 -= 0.1f;
-            printf("%f/%f\n", orto1, orto2);
-            break;
-        case 42:
-            orto1 += 0.1f;
-            printf("%f/%f\n", orto1, orto2);
-            break;
-        case 45:
-            orto2 -= 0.1f;
-            printf("%f/%f\n", orto1, orto2);
-            break;
-        case 43:
-            orto2 += 0.1f;
-            printf("%f/%f\n", orto1, orto2);
-            break;
+            /*
+            case 52:
+                trans_x = 0.0f;
+                printf("%f %f %f\n", trans_x, trans_y, trans_z);
+                break;
+            case 53:
+                trans_y = 0.0f;
+                printf("%f %f %f\n", trans_x, trans_y, trans_z);
+                break;
+            case 54:
+                trans_z = 0.0f;
+                printf("%f %f %f\n", trans_x, trans_y, trans_z);
+                break;
+            case 55:
+                trans_x += 0.1f;
+                printf("%f %f %f\n", trans_x, trans_y, trans_z);
+                break;
+            case 56:
+                trans_y += 0.1f;
+                printf("%f %f %f\n", trans_x, trans_y, trans_z);
+                break;
+            case 57:
+                trans_z += 0.1f;
+                printf("%f %f %f\n", trans_x, trans_y, trans_z);
+                break;
+            case 49:
+                trans_x -= 0.1f;
+                printf("%f %f %f\n", trans_x, trans_y, trans_z);
+                break;
+            case 50:
+                trans_y -= 0.1f;
+                printf("%f %f %f\n", trans_x, trans_y, trans_z);
+                break;
+            case 51:
+                trans_z -= 0.1f;
+                printf("%f %f %f\n", trans_x, trans_y, trans_z);
+                break;
+            case 47:
+                orto1 -= 0.1f;
+                printf("%f/%f\n", orto1, orto2);
+                break;
+            case 42:
+                orto1 += 0.1f;
+                printf("%f/%f\n", orto1, orto2);
+                break;
+            case 45:
+                orto2 -= 0.1f;
+                printf("%f/%f\n", orto1, orto2);
+                break;
+            case 43:
+                orto2 += 0.1f;
+                printf("%f/%f\n", orto1, orto2);
+                break;
 
 
-        case 105:
-            orto3 -= 0.1f;
-            printf("%f/%f\n", orto3, orto4);
-            break;
-        case 107:
-            orto3 += 0.1f;
-            printf("%f/%f\n", orto3, orto4);
-            break;
-        case 111:
-            orto4 -= 0.1f;
-            printf("%f/%f\n", orto3, orto4);
-            break;
-        case 108:
-            orto4 += 0.1f;
-            printf("%f/%f\n", orto3, orto4);
-            break;
-
+            case 105:
+                orto3 -= 0.1f;
+                printf("%f/%f\n", orto3, orto4);
+                break;
+            case 107:
+                orto3 += 0.1f;
+                printf("%f/%f\n", orto3, orto4);
+                break;
+            case 111:
+                orto4 -= 0.1f;
+                printf("%f/%f\n", orto3, orto4);
+                break;
+            case 108:
+                orto4 += 0.1f;
+                printf("%f/%f\n", orto3, orto4);
+                break;
+             */
         case 119:
             posData->v += 30.0f;
             PRINTF("v: %f\n", posData->v)
@@ -1026,28 +975,20 @@ void Key(ESContext *esContext, unsigned char a, int b, int c) {
             PRINTF("angle: %f\n", posData->angle)
                     ;
             break;
-            /*case 43:
-                if (*ZOOM < 18) {
-                    GLubyte z_old = *ZOOM;
-                    ZOOM--;
-                    setPOS(esContext);
-                    for (l = 0; l < 3 * vert_len; l += 3) {
-                        verts[l] *= 2.0f * (*ZOOM - z_old);
-                        verts[l + 1] *= 2.0f * (*ZOOM - z_old);
-                    }
-                }
-                break;
-            case 45:
-                if (*ZOOM > 8) {
-                    GLubyte z_old = *ZOOM;
-                    ZOOM++;
-                    setPOS(esContext);
-                    for (l = 0; l < 3 * vert_len; l += 3) {
-                        verts[l] /= 2.0f * (z_old - *ZOOM);
-                        verts[l + 1] /= 2.0f * (z_old - *ZOOM);
-                    }
-                }
-                break;*/
+        case 45:
+            if (ORTHO < 10.0) {
+                ORTHO += 1.0f;
+                esMatrixLoadIdentity(&perspective);
+                esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
+            }
+            break;
+        case 43:
+            if (ORTHO > 2.0) {
+                ORTHO -= 1.0f;
+                esMatrixLoadIdentity(&perspective);
+                esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
+            }
+            break;
     }
 
 }
@@ -1085,7 +1026,7 @@ void conditionally_log_fix(struct gps_data_t gpsdata) {
     }
     PRINTF("lat=\"%f\" lon=\"%f\"\n", gpsdata.fix.latitude, gpsdata.fix.longitude);
 }*/
-int linear_suche(T_V_EIGENSCHAFTEN *M, int count, int id) {
+int linaere_suche_TVE(T_V_E *M, int count, int id) {
     for (int a = 0; a < count; a++) {
         if (M[a].id == id) {
             return a;
@@ -1094,10 +1035,31 @@ int linear_suche(T_V_EIGENSCHAFTEN *M, int count, int id) {
     return -1;
 }
 
-int binaere_suche(T_V_EIGENSCHAFTEN *M, int count, int id) {
-    int mitte;
-    int links = 0;
-    int rechts = count - 1;
+unsigned short linaere_suche_farbe(T_V_E *M, unsigned short count, float r, float g, float b) {
+    for (unsigned short a = 0; a < count; a++) {
+        if ((M[a].r == r) &&(M[a].g == g)&&(M[a].b == b)) {
+            return a;
+        }
+    }
+    return __SHRT_MAX__;
+}
+
+unsigned short linaere_suche_VERTS(float *M, unsigned short count, float x, float y) {
+    for (unsigned short n = 0; n < count; n++) {
+        if ((M[3 * n] == x) && (M[3 * n + 1] == y)) {
+            return n;
+        }
+    }
+    return __SHRT_MAX__;
+}
+
+unsigned short binaere_suche(T_V_E *M, unsigned short count, int id) {
+    unsigned short mitte;
+    unsigned short links = 0;
+
+    if (count == 0) return __SHRT_MAX__;
+
+    unsigned short rechts = count - 1;
 
     while (links <= rechts) {
         mitte = links + ((rechts - links) / 2);
@@ -1108,193 +1070,246 @@ int binaere_suche(T_V_EIGENSCHAFTEN *M, int count, int id) {
             if (M[mitte].id > id) {
                 rechts = mitte - 1;
             } else {
-
                 links = mitte + 1;
             }
         }
     }
-    return -1;
+    return __SHRT_MAX__;
 }
 
-int cmpfunc(const void * a, const void * b) {
-    return (((T_V_EIGENSCHAFTEN*) a)->id - ((T_V_EIGENSCHAFTEN*) b)->id);
+int cmpfunc_farbe(const void * a, const void * b) {
+    float r_a = ((T_V_E *) a)->r;
+    float g_a = ((T_V_E *) a)->g;
+    float b_a = ((T_V_E *) a)->b;
+
+    float r_b = ((T_V_E *) b)->r;
+    float g_b = ((T_V_E *) b)->g;
+    float b_b = ((T_V_E *) b)->b;
+
+    if (r_a < r_b)
+        return -1;
+    else if (r_a > r_b)
+        return 1;
+
+    if (g_a < g_b)
+        return -1;
+    else if (g_a > g_b)
+        return 1;
+
+    if (b_a < b_b)
+        return -1;
+    else if (b_a > b_b)
+        return 1;
+
+    return 0;
+}
+
+int cmpfunc_id(const void * a, const void * b) {
+    return (((T_V_E*) a)->id - ((T_V_E*) b)->id);
+}
+
+void insertVert_index(T_V_E *src, unsigned short len, unsigned short *index, unsigned short *index_len, T_V_E *fa, unsigned short *farbe_len) {
+    unsigned short gef2 = 0;
+    float r = -1.0, g = -1.0, b = -1.0;
+
+    for (unsigned short a = 0; a < len; a++) {
+        if ((src[a].r != r) || (src[a].g != g) || (src[a].b != b)) {
+            fa[*farbe_len].r = src[a].r;
+            fa[*farbe_len].g = src[a].g;
+            fa[*farbe_len].b = src[a].b;
+            r = src[a].r;
+            g = src[a].g;
+            b = src[a].b;
+
+            fa[*farbe_len].index = *index_len;
+            fa[*farbe_len].len = src[a].len;
+
+            (*farbe_len)++;
+        } else {
+            fa[*farbe_len - 1].len += src[a].len;
+        }
+
+        for (unsigned short n = 0; n < src[a].len; n++) {
+            gef2 = linaere_suche_VERTS(verts, verts_len, tmp_verts[ 3 * (src[a].index + n)], tmp_verts[ 3 * (src[a].index + n) + 1]);
+            index[*index_len] = gef2;
+            (*index_len)++;
+        }
+    }
+}
+
+void insertT_V_E(T_V_E *dst, unsigned short *dst_len, T_V_E *src, unsigned short len) {
+    unsigned short gef = 0;
+    for (unsigned short n = 0; n < tmp_vert_len; n++) {
+        gef = linaere_suche_VERTS(verts, verts_len, tmp_verts[ 3 * n], tmp_verts[ 3 * n + 1]);
+
+        if (gef == __SHRT_MAX__) {
+
+            memcpy(&verts[3 * verts_len], &tmp_verts[3 * n], 3 * sizeof (GLfloat));
+            verts_len++;
+        }
+    }
+
+    memcpy(dst, src, len * sizeof (T_V_E));
+    *dst_len = len;
+}
+
+void insertT_V_E_old(T_V_E *dst, unsigned short *dst_len, T_V_E *src, unsigned short len) {
+    unsigned short gef = 0, gef2 = 0;
+    for (int a = 0; a < len; a++) {
+        gef = binaere_suche(dst, *dst_len, src[a].id);
+
+        if (gef == __SHRT_MAX__) {
+            for (unsigned short n = 0; n < src[a].len; n++) {
+                gef2 = linaere_suche_VERTS(verts, verts_len, tmp_verts[ 3 * (src[a].index + n)], tmp_verts[ 3 * (src[a].index + n) + 1]);
+
+                if (gef2 == __SHRT_MAX__) {
+
+                    memcpy(&verts[3 * verts_len], &tmp_verts[3 * (src[a].index + n)], 3 * sizeof (GLfloat));
+                    verts_len++;
+                }
+            }
+            //memcpy(&verts[3 * verts_len], &tmp_verts[3 * src[a].index], 3 * src[a].len * sizeof (GLfloat));
+            //src[a].index = verts_len;
+            //verts_len += src[a].len;
+            memcpy(&dst[(*dst_len)++], &src[a], sizeof (T_V_E));
+        }
+    }
 }
 
 void loadVert(double lon, double lat, double d) {
+
+    struct timespec spec0, spec1, spec2;
+    unsigned int ms;
+
     char where[110];
-    char vertex[200];
-    char polygon[200];
+    char sql_vertex[200];
+    char sql_polygon[200];
+    char sql_reis[200];
+    char sql_verts[200];
     char sql[500];
 
+    setlocale(LC_NUMERIC, "en_US.UTF-8");
+
     snprintf(where, 110, " v_lon between %f and  %f and v_lat between %f and %f", lon - d, lon + d, lat - d, lat + d);
-    snprintf(vertex, 200, "(SELECT DISTINCT v_l_id FROM vertex WHERE %s)", where);
-    snprintf(polygon, 200, "(SELECT DISTINCT v_l_id FROM polygon WHERE %s)", where);
+    snprintf(sql_vertex, 200, "(SELECT DISTINCT v_l_id FROM vertex WHERE %s)", where);
+    snprintf(sql_polygon, 200, "(SELECT DISTINCT v_l_id FROM polygon WHERE %s)", where);
+    snprintf(sql_reis, 200, "(SELECT DISTINCT v_l_id FROM residential WHERE %s)", where);
+
+    snprintf(sql_verts, 200, "(SELECT DISTINCT v_l_id FROM v_verts WHERE %s)", where);
 
     char *zErrMsg = 0;
 
     tmp_vert_len = 0;
     tmp_yama_len = 0;
     tmp_werder_len = 0;
+    tmp_reis_len = 0;
     sqc_tmp = 0;
 
-#ifdef __TM__
-    unsigned int ms = 0;
-    struct timespec spec1, spec2;
+    //snprintf(sql, 1000, "SELECT v_lon,v_lat FROM polygon t JOIN %s g ON t.v_l_id = g.v_l_id UNION SELECT v_lon,v_lat FROM vertex t JOIN %s  g ON t.v_l_id = g.v_l_id UNION SELECT v_lon,v_lat FROM residential t JOIN %s g ON t.v_l_id = g.v_l_id", sql_polygon, sql_vertex, sql_reis);
+
+    clock_gettime(CLOCK_MONOTONIC, &spec0);
     clock_gettime(CLOCK_MONOTONIC, &spec1);
-#endif
+
     // Flächen laden
-    snprintf(sql, 500, "SELECT v_lon,v_lat FROM polygon t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", polygon);
+    snprintf(sql, 500, "SELECT v_lon,v_lat FROM polygon t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", sql_polygon);
     sqlite3_exec(db, sql, sqc_vertex, 0, &zErrMsg);
-#ifdef __TM__
-    clock_gettime(CLOCK_MONOTONIC, &spec2);
-    //PRINTF("\r%s\n", sql);
-    ms = (spec2.tv_sec - spec1.tv_sec) * 1000 + (spec2.tv_nsec - spec1.tv_nsec) * 1e-6;
-    PRINTF("\rloadVert TM: %ims\n", ms);
-#endif
+    //printf("%s\n", sql);
+    TM(spec1, spec2, 'Flächen laden')
+
     // Wege laden
-    //snprintf(sql, 500, "SELECT v_mlon,v_llon,v_mlat,v_llat FROM vertex t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", vertex);
-    snprintf(sql, 500, "SELECT v_lon,v_lat FROM vertex t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", vertex);
+    snprintf(sql, 500, "SELECT v_lon,v_lat FROM vertex t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", sql_vertex);
     sqlite3_exec(db, sql, sqc_vertex, 0, &zErrMsg);
-#ifdef __TM__
-    clock_gettime(CLOCK_MONOTONIC, &spec1);
-    //PRINTF("\r%s\n", sql);
-    ms = (spec1.tv_sec - spec2.tv_sec) * 1000 + (spec1.tv_nsec - spec2.tv_nsec) * 1e-6;
-    PRINTF("\rloadVert TM: %ims\n", ms);
-#endif  
+    //printf("%s\n", sql);
+    TM(spec2, spec1, 'Wege laden')
+
+    // Residental laden
+    snprintf(sql, 500, "SELECT v_lon,v_lat FROM residential t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", sql_reis);
+    sqlite3_exec(db, sql, sqc_vertex, 0, &zErrMsg);
+    //printf("%s\n", sql);
+    TM(spec1, spec2, 'Residental laden')
+
+    // Anzahl der der Flächenfarben
+    //snprintf(sql, 500, "SELECT count(*) FROM (SELECT distinct R,G,B FROM eigenschaften JOIN %s ON l_id=v_l_id JOIN config_farbe ON CF_ID=L_TYP)", sql_polygon);
+    //sqlite3_exec(db, sql, sqc_farbe, &farbe_len, &zErrMsg);
+
     // Eigenschaften Fläche
-    snprintf(sql, 500, "SELECT L_ID,L_COUNT,L_F_R,L_F_G,L_F_B,L_LON1,L_LON2,L_LAT1,L_LAT2 FROM eigenschaften JOIN %s ON l_id=v_l_id ORDER BY l_id ASC", polygon);
-    sqlite3_exec(db, sql, sqc_yama, &tmp_werder_len, &zErrMsg);
-    tmp_yama_len = tmp_werder_len;
-#ifdef __TM__
-    clock_gettime(CLOCK_MONOTONIC, &spec2);
-    //PRINTF("\r%s\n", sql);
-    ms = (spec2.tv_sec - spec1.tv_sec) * 1000 + (spec2.tv_nsec - spec1.tv_nsec) * 1e-6;
-    PRINTF("\rloadVert TM: %ims\n", ms);
-#endif
+    snprintf(sql, 500, "SELECT L_ID,L_COUNT,R,G,B,OSM_ID FROM eigenschaften JOIN %s ON l_id=v_l_id JOIN config_farbe ON CF_ID=L_TYP ORDER BY l_id ASC", sql_polygon);
+    sqlite3_exec(db, sql, sqc_yama, &tmp_reis_len, &zErrMsg);
+    tmp_yama_len = tmp_reis_len;
+    //printf("%s\n",sql);
+    TM(spec2, spec1, 'Eigenschaften Fläche')
+
     // Eigenschaften Weg
-    snprintf(sql, 500, "SELECT L_ID,L_COUNT,L_F_R,L_F_G,L_F_B,L_LON1,L_LON2,L_LAT1,L_LAT2 FROM eigenschaften JOIN %s ON l_id=v_l_id ORDER BY l_id ASC", vertex);
-    sqlite3_exec(db, sql, sqc_yama, &tmp_werder_len, &zErrMsg);
-#ifdef __TM__
-    clock_gettime(CLOCK_MONOTONIC, &spec1);
-    //PRINTF("\r%s\n", sql);
-    ms = (spec1.tv_sec - spec2.tv_sec) * 1000 + (spec1.tv_nsec - spec2.tv_nsec) * 1e-6;
-    PRINTF("\rloadVert TM: %ims\n", ms);
-#endif  
-    //////////////////////
-    int gef = 0;
+    snprintf(sql, 500, "SELECT L_ID,L_COUNT,R,G,B,OSM_ID FROM eigenschaften JOIN %s ON l_id=v_l_id JOIN config_farbe ON CF_ID=L_TYP ORDER BY l_id ASC", sql_vertex);
+    sqlite3_exec(db, sql, sqc_yama, &tmp_reis_len, &zErrMsg);
+    tmp_werder_len = tmp_reis_len;
+    //printf("%s\n", sql);
+    TM(spec1, spec2, 'Eigenschaften Weg')
 
-    // flächenindex aufräumen
-#define BR2 (4 * BR + 2)
-    int tmp_lon = (int) floor(lon);
-    int tmp_lat = (int) floor(lat);
-    int p_leer = 0;
+    // Eigenschaften Residental
+    snprintf(sql, 500, "SELECT L_ID,L_COUNT,R,G,B,OSM_ID FROM eigenschaften JOIN %s ON l_id=v_l_id JOIN config_farbe ON CF_ID=L_TYP ORDER BY l_id ASC", sql_reis);
+    sqlite3_exec(db, sql, sqc_yama, &tmp_reis_len, &zErrMsg);
+    //printf("%s\n", sql);
+    TM(spec2, spec1, 'Eigenschaften Residental')
 
-    /*for (int a = 0; a < yama_len; a++) {
-        if ((abs(yama[a].lon1 - tmp_lon) + abs(yama[a].lon2 - tmp_lon) + abs(yama[a].lat1 - tmp_lat) + abs(yama[a].lat2 - tmp_lat)) > BR2) {
-            printf("asd: %i\n", abs(yama[a].lon1 - tmp_lon) + abs(yama[a].lon2 - tmp_lon) + abs(yama[a].lat1 - tmp_lat) + abs(yama[a].lat2 - tmp_lat));
-            yama[a].id = INT_MAX;
-            p_leer++;
-        }
-    }
-    PRINTF("\rloadVert yama aufräumen: %i\n", p_leer);
-     */
-    //bubble_sort(yama, yama_len);
-    qsort(yama, yama_len, sizeof (T_V_EIGENSCHAFTEN), cmpfunc);
-    //yama_len -= p_leer;
-
-    // wegeindex aufräumen
-    /*p_leer = 0;
-    for (int a = 0; a < werder_len; a++) {
-        if ((abs(werder[a].lon1 - tmp_lon) + abs(werder[a].lon2 - tmp_lon) + abs(werder[a].lat1 - tmp_lat) + abs(werder[a].lat2 - tmp_lat)) > BR2) {
-            werder[a].id = INT_MAX;
-            p_leer++;
-        }
-    }
-    PRINTF("\rloadVert yama aufräumen: %i\n", p_leer);
-     */
-    //bubble_sort(werder, werder_len);
-    qsort(werder, werder_len, sizeof (T_V_EIGENSCHAFTEN), cmpfunc);
-    //werder_len -= p_leer;
-
-#ifdef __TM__
-    clock_gettime(CLOCK_MONOTONIC, &spec2);
-    ms = (spec2.tv_sec - spec1.tv_sec) * 1000 + (spec2.tv_nsec - spec1.tv_nsec) * 1e-6;
-    PRINTF("\rloadVert TM GB: %ims\n", ms);
-#endif  
+    //qsort(yama, yama_len, sizeof (T_V_E), cmpfunc_id);
+    //qsort(werder, werder_len, sizeof (T_V_E), cmpfunc_id);
+    //qsort(reis, reis_len, sizeof (T_V_E), cmpfunc_id);
+    //TM(spec1, spec2, 'qsort')
 
     // neue Flächen hinzufügen
-    int asd = 0;
-    for (int a = 0; a < tmp_yama_len; a++) {
-        //gef = linear_suche(yama, yama_len, tmp_yama[a].id);
-        gef = binaere_suche(yama, yama_len, tmp_yama[a].id);
+    insertT_V_E(yama, &yama_len, &tmp_yama[0], tmp_yama_len);
+    insertT_V_E(werder, &werder_len, &tmp_yama[tmp_yama_len], tmp_werder_len - tmp_yama_len);
+    insertT_V_E(reis, &reis_len, &tmp_yama[tmp_werder_len], tmp_reis_len - tmp_werder_len);
+    TM(spec2, spec1, 'insertT_V_E')
 
-        if (gef == -1) {
-            memcpy(&verts[3 * vert_len], &tmp_verts[3 * tmp_yama[a].index], 3 * tmp_yama[a].len * sizeof (GLfloat));
-            tmp_yama[a].index = vert_len;
-            vert_len += tmp_yama[a].len;
-            memcpy(&yama[yama_len + asd], &tmp_yama[a], sizeof (T_V_EIGENSCHAFTEN));
-            asd++;
-        }
-    }
-    yama_len += asd;
-    asd = 0;
-    for (int a = tmp_yama_len; a < tmp_werder_len; a++) {
-        gef = binaere_suche(werder, werder_len, tmp_yama[a].id);
+    qsort(yama, yama_len, sizeof (T_V_E), cmpfunc_farbe);
+    qsort(reis, reis_len, sizeof (T_V_E), cmpfunc_farbe);
+    qsort(werder, werder_len, sizeof (T_V_E), cmpfunc_farbe);
+    TM(spec1, spec2, 'qsort')
 
-        if (gef == -1) {
 
-            memcpy(&verts[3 * vert_len], &tmp_verts[3 * tmp_yama[a].index], 3 * tmp_yama[a].len * sizeof (GLfloat));
-            tmp_yama[a].index = vert_len;
-            vert_len += tmp_yama[a].len;
-            memcpy(&werder[werder_len + asd], &tmp_yama[a], sizeof (T_V_EIGENSCHAFTEN));
-            asd++;
-        }
-    }
-    werder_len += asd;
-#ifdef __TM__
-    clock_gettime(CLOCK_MONOTONIC, &spec1);
-    ms = (spec1.tv_sec - spec2.tv_sec) * 1000 + (spec1.tv_nsec - spec2.tv_nsec) * 1e-6;
-    PRINTF("\rloadVert TM CP: %ims\n", ms);
-#endif     
-    PRINTF("\rloadVert       : %f, %f\n", lon, lat);
-    PRINTF("\rloadVert sqlite: vertex: %i  yama_len: %i  werder_len: %i\n", tmp_vert_len, tmp_yama_len, tmp_werder_len - tmp_yama_len);
-    PRINTF("\rloadVert    ram: vertex: %i  yama_len: %i  werder_len: %i\n", vert_len, yama_len, werder_len);
-    PRINTF("\r###############################################################\n");
+    ///////////////////
+    T_V_E tmp_farbe[20];
+    static unsigned short tmp_yama_index[V_LEN];
+    unsigned short tmp_farbe_werder_len = 0, tmp_farbe_reis_len = 0, tmp_farbe_yama_len = 0;
+    unsigned short tmp_yama_index_len = 0;
+
+    insertVert_index(reis, reis_len, tmp_yama_index, &tmp_yama_index_len, tmp_farbe, &tmp_farbe_werder_len);
+    tmp_farbe_reis_len = tmp_farbe_yama_len;
+    insertVert_index(yama, yama_len, tmp_yama_index, &tmp_yama_index_len, tmp_farbe, &tmp_farbe_werder_len);
+    tmp_farbe_yama_len = tmp_farbe_werder_len;
+    insertVert_index(werder, werder_len, tmp_yama_index, &tmp_yama_index_len, tmp_farbe, &tmp_farbe_werder_len);
+
+
+    pthread_mutex_lock(&m_deto);
+    farbe_werder_len = tmp_farbe_werder_len;
+    farbe_reis_len = tmp_farbe_reis_len;
+    farbe_yama_len = tmp_farbe_yama_len;
+    yama_index_len = tmp_yama_index_len;
+    memcpy(farbe, tmp_farbe, 20 * sizeof (T_V_E));
+    memcpy(yama_index, tmp_yama_index, tmp_yama_index_len * sizeof (unsigned short));
+    new_tex = 1;
+    pthread_mutex_unlock(&m_deto);
+
+
+
+
+    TM(spec2, spec1, 'insertVert_index')
+
+    printf("\rloadVert   %f, %f   %.1f\n", lon, lat, BR);
+    printf("\rloadVert   verts: %i  index: %i  yama: %i  werder: %i resi: %i\n", verts_len, yama_index_len, yama_len, werder_len, reis_len);
+    printf("\r###############################################################\n");
     /*
-       int lk = pthread_mutex_lock(&m_pinto);
-       vert_len = tmp_vert_len;
-       yama_len = tmp_yama_len;
-       werder_len = tmp_werder_len - tmp_yama_len;
-       memcpy(verts, tmp_verts, 3 * vert_len * sizeof (GLfloat));
-       memcpy(yama, tmp_yama, yama_len * sizeof (T_V_EIGENSCHAFTEN));
-       memcpy(werder, &tmp_yama[yama_len], werder_len * sizeof (T_V_EIGENSCHAFTEN));
-       pthread_mutex_unlock(&m_pinto);
+     vbox: alt: ca. 800ms
      */
-    //if (memcmp(verts, test_verts, sizeof (float)*3 * tmp_vert_len) != 0) {
-    //  printf("verts\n");
-    /*for (int n = 0; n < 3 * tmp_vert_len; n++) {
-        if (verts[n] != test_verts[n]) {
-            printf("verts: %i\n", n);
-        }
-    }*/
-    //}
-    /*
-    if (memcmp(yama, test_yama, sizeof (T_V_EIGENSCHAFTEN) * tmp_yama_len) != 0)
-        printf("yama\n");
-    if (memcmp(werder, test_werder, sizeof (T_V_EIGENSCHAFTEN) * (tmp_werder_len - tmp_yama_len)) != 0)
-        printf("werder\n");
-     */
-    /*FILE *array;
-    array = fopen("/home/florian/asd", "w+");
-    fwrite(yama, sizeof (yama), 1, array);
-    fclose(array);*/
+    TM(spec0, spec2, 'gesamt')
 }
 
 void setPOS(ESContext * esContext) {
 
     POS_T *posData = esContext->posData;
 
-    pow2Z = pow(2.0, *ZOOM);
     PRINTF("\rsetPOS lon/lat: %f %f\n", posData->gps_longitude, posData->gps_latitude);
 
     posData->g_x = (posData->gps_longitude + 180.0) / 360.0 * pow2Z;
@@ -1309,7 +1324,7 @@ void setPOS(ESContext * esContext) {
     posData->m_y = (int) floor(fmod(posData->g_y, 1.0f)*1000000.0);
     PRINTF("\rsetPOS m: %i %i\n", posData->m_x, posData->m_y);
 
-    posData->osmS = 40075017 * cos(posData->gps_latitude * M_PI / 180.0) / pow(2.0, *ZOOM + 8) * IMAGE_SIZE;
+    posData->osmS = 40075017 * cos(posData->gps_latitude * M_PI / 180.0) / pow(2.0, 18.0 + 8.0) * IMAGE_SIZE;
 }
 
 void * foss(void *esContext) {
@@ -1350,10 +1365,13 @@ void * foss(void *esContext) {
         }
         gpio_lcd_send_byte(LCD_LINE_2, GPIO_LOW);
         for (int a = 0; a < 20; a++) {
+            if (line2_str[a] == 0)
+
+                break;
             gpio_lcd_send_byte(line2_str[a], GPIO_HIGH);
         }
 #endif
-        usleep(500000);
+        usleep(100000);
 
     }
     return NULL;
@@ -1366,7 +1384,7 @@ void * deta(void *esContext) {
     while (1) {
 
         loadVert(posData->g_x, posData->g_y, BR);
-        new_tex = 1;
+        //new_tex = 1;
         sleep(5);
         //posData->v = 60.0f;
     }
@@ -1398,19 +1416,19 @@ void * jolla(void *esContext) {
 
         if (finish == 1) {
             if (rawX > 710 && rawX < 750 && rawY > 430 && rawY < 480) {
-                if (*ZOOM > 8) {
+                /*if (*ZOOM > 8) {
                     ZOOM++;
                     PRINTF("ZOOM: %i\n", *ZOOM);
                     setPOS(esContext);
                     PRINTF("jolla: %i/%i %i/%i\n", posData->t_x, posData->gpu_t_x, posData->t_y, posData->gpu_t_y);
-                }
+                }*/
             } else if (rawX > 760 && rawX < 800 && rawY > 430 && rawY < 480) {
-                if (*ZOOM < 18) {
+                /*if (*ZOOM < 18) {
                     ZOOM--;
                     PRINTF("ZOOM: %i\n", *ZOOM);
                     setPOS(esContext);
                     PRINTF("jolla: %i/%i %i/%i\n", posData->t_x, posData->gpu_t_x, posData->t_y, posData->gpu_t_y);
-                }
+                }*/
             }
         }
     }
@@ -1692,29 +1710,19 @@ static int sqc_vertex(void *NotUsed, int argc, char **argv, char **azColName) {
     return 0;
 }
 
-/*
-static int sqc_vertex2(void *NotUsed, int argc, char **argv, char **azColName) {
-    tmp_verts_2[6 * tmp_vert_len] = atoi(argv[0]);
-    tmp_verts_2[6 * tmp_vert_len + 1] = atoi(argv[1]);
-    tmp_verts_2[6 * tmp_vert_len + 2] = atoi(argv[2]);
-    tmp_verts_2[6 * tmp_vert_len + 3] = atoi(argv[3]);
-    tmp_verts_2[6 * tmp_vert_len + 4] = 0;
-    tmp_verts_2[6 * tmp_vert_len + 5] = 0;
-
-    tmp_vert_len++;
+static int sqc_farbe(void *a, int argc, char **argv, char **azColName) {
+    *((unsigned short*) a) = atoi(argv[0]);
 
     return 0;
-}*/
+}
+
 static int sqc_yama(void *a, int argc, char **argv, char **azColName) {
     tmp_yama[*((int*) a)].id = atoi(argv[0]);
     tmp_yama[*((int*) a)].len = atoi(argv[1]);
     tmp_yama[*((int*) a)].r = atof(argv[2]);
     tmp_yama[*((int*) a)].g = atof(argv[3]);
     tmp_yama[*((int*) a)].b = atof(argv[4]);
-    tmp_yama[*((int*) a)].lon1 = atoi(argv[5]);
-    tmp_yama[*((int*) a)].lon2 = atoi(argv[6]);
-    tmp_yama[*((int*) a)].lat1 = atoi(argv[7]);
-    tmp_yama[*((int*) a)].lat2 = atoi(argv[8]);
+    tmp_yama[*((int*) a)].osm_id = atoi(argv[5]);
 
     tmp_yama[*((int*) a)].index = sqc_tmp;
     sqc_tmp += tmp_yama[*((int*) a)].len;
@@ -1783,6 +1791,7 @@ int main(int argc, char *argv[]) {
 
     pthread_t thread_id1, thread_id2, thread_id3, thread_id4;
     pthread_mutex_init(&m_pinto, NULL);
+    pthread_mutex_init(&m_deto, NULL);
 
     signal(SIGTERM, ShutDown);
     //signal(SIGINT, ShutDown);
@@ -1813,8 +1822,6 @@ int main(int argc, char *argv[]) {
     assert(gps_in != NULL);
     PRINTF("%s geladen.\n", filename);
 #endif
-
-    ZOOM = &ZOOM_S[0];
 
     userData.element4Pixel = 1;
     userData.imgrow_sz = IMAGE_SIZE * userData.element4Pixel;
@@ -1848,13 +1855,11 @@ int main(int argc, char *argv[]) {
     esCreateWindow(&esContext, "SiT2D", userData.width, userData.height, ES_WINDOW_RGB);
 
     rad2deg = M_PI / 180.0f;
-
-    //posData.gps_latitude = 52.0741805;
-    //posData.gps_longitude = 11.7785122;
-    //posData.gps_latitude = 52.1317318;
-    //posData.gps_longitude = 11.6530552;
-    posData.gps_latitude = 52.1317115;
-    posData.gps_longitude = 11.6530537;
+    pow2Z = pow(2.0, 18.0);
+    posData.gps_latitude = 52.1340037;
+    posData.gps_longitude = 11.6547915;
+    //posData.gps_latitude = 52.0370333;
+    //posData.gps_longitude = 11.6658727;
     posData.gps_altitude = 0.0;
     posData.obd_speed = 0.0;
     posData.obd_volt = 12.4;
@@ -1869,23 +1874,25 @@ int main(int argc, char *argv[]) {
 #define SZ 4096
 #define PAGES 8192
     strncpy(filename, homedir, 50);
-    char *db_file = strncat(filename, "/sit2d_3.db", 50);
+    char *db_file = strncat(filename, "/sit2d_4.db", 50);
     double *sqlite_cache = (double*) malloc(SZ * PAGES);
     assert(sqlite3_config(SQLITE_CONFIG_PAGECACHE, &sqlite_cache[0], SZ, PAGES) == SQLITE_OK);
     sqlite3_initialize();
     assert(sqlite3_open_v2(db_file, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
 
-    vert_len = 0;
+    verts_len = 0;
     yama_len = 0;
     werder_len = 0;
-    loadVert(floor(posData.g_x), floor(posData.g_y), BR);
-    new_tex = 1;
+
+    loadVert(posData.g_x, posData.g_y, BR);
+
+    //exit(0);
 
     esMatrixLoadIdentity(&perspective);
     esMatrixLoadIdentity(&mvpTex);
-    //esPerspective( &perspective, 60.0f, (GLfloat) esContext->width / (GLfloat) esContext->height, 1.0f, 100.0f );
-    esOrtho(&perspective, -V_Y, V_Y, -V_Y, V_Y, -50, 50);
+    esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
     esOrtho(&mvpTex, -BR, BR, -BR, BR, -50, 50);
+
     char buf[50];
 
     snprintf(buf, 50, "%s/RES/minus.tga", homedir);
@@ -1912,10 +1919,10 @@ int main(int argc, char *argv[]) {
     //intro(&esContext);
     glClearColor(1.0f, 1.0f, 0.0f, 1.0f);
 
-    pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
+    //pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
     //pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
     //pthread_create(&thread_id3, NULL, &jolla, (void*) &esContext);
-    //pthread_create(&thread_id4, NULL, &deta, (void*) &esContext);
+    pthread_create(&thread_id4, NULL, &deta, (void*) &esContext);
 
     esMainLoop(&esContext);
 
