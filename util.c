@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
-#include <png.h>
+//#include <png.h>
 #include <assert.h>
 #include <sys/stat.h>
 #include "util.h"

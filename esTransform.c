@@ -48,8 +48,8 @@ esRotate(ESMatrix *result, GLfloat angle, GLfloat x, GLfloat y, GLfloat z) {
     float sinAngle, cosAngle;
     GLfloat mag = sqrtf(x * x + y * y + z * z);
 
-    sinAngle = sinf(angle * rad2deg);
-    cosAngle = cosf(angle * rad2deg);
+    sinAngle = sinf(angle);
+    cosAngle = cosf(angle);
     //printf("%f %f\n", sinAngle, cosAngle);
     if (mag > 0.0f) {
         GLfloat xx, yy, zz, xy, yz, zx, xs, ys, zs;

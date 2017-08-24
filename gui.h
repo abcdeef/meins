@@ -17,29 +17,33 @@
 float buttons[] = {
     /* x, y, t_x, t_y*/
     /* Dreieck */
-      -P, -P - 0.3f, 0.0f, 0.0f,
-    0.0f,     -0.3f, 0.0f, 1.0f,
-       P, -P - 0.3f, 1.0f, 0.0f,
+    -P, -P, 0.0f, 0.0f,
+    0.0f, 0.0f, 0.0f, 1.0f,
+    P, -P, 1.0f, 0.0f,
     /* plus */
-    -K + B_X,  K - B_Y, 0.0f, 0.0f,
+    -K + B_X, K - B_Y, 0.0f, 0.0f,
     -K + B_X, -K - B_Y, 0.0f, 1.0f,
-     K + B_X,  K - B_Y, 1.0f, 0.0f,
-     K + B_X, -K - B_Y, 1.0f, 1.0f,
+    K + B_X, K - B_Y, 1.0f, 0.0f,
+    K + B_X, -K - B_Y, 1.0f, 1.0f,
     /* minus */
-    -K + B_X - 0.13f,  K - B_Y, 0.0f, 0.0f,
+    -K + B_X - 0.13f, K - B_Y, 0.0f, 0.0f,
     -K + B_X - 0.13f, -K - B_Y, 0.0f, 1.0f,
-     K + B_X - 0.13f,  K - B_Y, 1.0f, 0.0f,
-     K + B_X - 0.13f, -K - B_Y, 1.0f, 1.0f,
+    K + B_X - 0.13f, K - B_Y, 1.0f, 0.0f,
+    K + B_X - 0.13f, -K - B_Y, 1.0f, 1.0f,
     /* menu */
-    -K - B_X,  K - B_Y, 0.0f, 0.0f,
+    -K - B_X, K - B_Y, 0.0f, 0.0f,
     -K - B_X, -K - B_Y, 0.0f, 1.0f,
-     K - B_X,  K - B_Y, 1.0f, 0.0f,
-     K - B_X, -K - B_Y, 1.0f, 1.0f,
+    K - B_X, K - B_Y, 1.0f, 0.0f,
+    K - B_X, -K - B_Y, 1.0f, 1.0f,
     /* GPS_I */
     GPS_I_X - GPS_I_R / 2, GPS_I_Y + GPS_I_R / 2, 0.0, 1.0,
     GPS_I_X - GPS_I_R / 2, GPS_I_Y - GPS_I_R / 2, 0.0, 0.0,
     GPS_I_X + GPS_I_R / 2, GPS_I_Y + GPS_I_R / 2, 1.0, 1.0,
-    GPS_I_X + GPS_I_R / 2, GPS_I_Y - GPS_I_R / 2, 1.0, 0.0
+    GPS_I_X + GPS_I_R / 2, GPS_I_Y - GPS_I_R / 2, 1.0, 0.0,
+    /* Dreieck2 */
+    -0.02f, -0.03f, 0.0f, 0.0f,
+    0.0f, -0.01f, 0.0f, 1.0f,
+    0.02f, -0.03f, 1.0f, 0.0f,
 };
 
 unsigned short auto_tex = ROT;

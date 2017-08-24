@@ -1,9 +1,28 @@
 #ifdef __RASPI__
-  #include "esUtil_raspi.h"
+#include "esUtil_raspi.h"
 #else
-  #include "esUtil.h"
+#include "esUtil.h"
 #endif
+
 #include <stdlib.h>
+#include <stdio.h>
+#include <fcntl.h>
+
+void LoadGLSL(char ** buffer, char * filename) {
+    FILE * f = fopen(filename, "rb");
+    if (f) {
+        fseek(f, 0L, SEEK_END);
+        long length = ftell(f);
+        *buffer = malloc(length);
+
+        if (*buffer) {
+            fseek(f, 0L, SEEK_SET);
+            fread(*buffer, 1, length, f);
+        }
+        fclose(f);
+    }
+}
+
 //
 ///
 /// \brief Load a shader, check for compile errors, print error messages to output log
@@ -11,46 +30,45 @@
 /// \param shaderSrc Shader source string
 /// \return A new shader object on success, 0 on failure
 //
-GLuint ESUTIL_API esLoadShader ( GLenum type, const char *shaderSrc )
-{
-   GLuint shader;
-   GLint compiled;
-   
-   // Create the shader object
-   shader = glCreateShader ( type );
 
-   if ( shader == 0 )
-   	return 0;
+GLuint ESUTIL_API esLoadShader(GLenum type, const char *shaderSrc) {
+    GLuint shader;
+    GLint compiled;
 
-   // Load the shader source
-   glShaderSource ( shader, 1, &shaderSrc, NULL );
-   
-   // Compile the shader
-   glCompileShader ( shader );
+    // Create the shader object
+    shader = glCreateShader(type);
 
-   // Check the compile status
-   glGetShaderiv ( shader, GL_COMPILE_STATUS, &compiled );
+    if (shader == 0)
+        return 0;
 
-   if ( !compiled )  {
-      GLint infoLen = 0;
+    // Load the shader source
+    glShaderSource(shader, 1, &shaderSrc, NULL);
 
-      glGetShaderiv ( shader, GL_INFO_LOG_LENGTH, &infoLen );
-      
-      if ( infoLen > 1 )
-      {
-         char* infoLog = malloc (sizeof(char) * infoLen );
+    // Compile the shader
+    glCompileShader(shader);
 
-         glGetShaderInfoLog ( shader, infoLen, NULL, infoLog );
-         esLogMessage ( "Error compiling shader:\n%s\n", infoLog );            
-         
-         free ( infoLog );
-      }
+    // Check the compile status
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
 
-      glDeleteShader ( shader );
-      return 0;
-   }
+    if (!compiled) {
+        GLint infoLen = 0;
 
-   return shader;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
+
+        if (infoLen > 1) {
+            char* infoLog = malloc(sizeof (char) * infoLen);
+
+            glGetShaderInfoLog(shader, infoLen, NULL, infoLog);
+            esLogMessage("Error compiling shader:\n%s\n", infoLog);
+
+            free(infoLog);
+        }
+
+        glDeleteShader(shader);
+        return 0;
+    }
+
+    return shader;
 
 }
 
@@ -63,63 +81,60 @@ GLuint ESUTIL_API esLoadShader ( GLenum type, const char *shaderSrc )
 /// \param fragShaderSrc Fragment shader source code
 /// \return A new program object linked with the vertex/fragment shader pair, 0 on failure
 //
-GLuint ESUTIL_API esLoadProgram ( const char *vertShaderSrc, const char *fragShaderSrc )
-{
-   GLuint vertexShader;
-   GLuint fragmentShader;
-   GLuint programObject;
-   GLint linked;
 
-   // Load the vertex/fragment shaders
-   vertexShader  = esLoadShader ( GL_VERTEX_SHADER, vertShaderSrc );
-   if ( vertexShader == 0 )
-      return 0;
+GLuint ESUTIL_API esLoadProgram(const char *vertShaderSrc, const char *fragShaderSrc) {
+    GLuint vertexShader;
+    GLuint fragmentShader;
+    GLuint programObject;
+    GLint linked;
 
-   fragmentShader  = esLoadShader ( GL_FRAGMENT_SHADER, fragShaderSrc );
-   if ( fragmentShader == 0 )
-   {
-      glDeleteShader( vertexShader );
-      return 0;
-   }
+    // Load the vertex/fragment shaders
+    vertexShader = esLoadShader(GL_VERTEX_SHADER, vertShaderSrc);
+    if (vertexShader == 0)
+        return 0;
 
-   // Create the program object
-   programObject = glCreateProgram ( );
-   
-   if ( programObject == 0 )
-      return 0;
+    fragmentShader = esLoadShader(GL_FRAGMENT_SHADER, fragShaderSrc);
+    if (fragmentShader == 0) {
+        glDeleteShader(vertexShader);
+        return 0;
+    }
 
-   glAttachShader ( programObject, vertexShader );
-   glAttachShader ( programObject, fragmentShader );
+    // Create the program object
+    programObject = glCreateProgram();
 
-   // Link the program
-   glLinkProgram ( programObject );
+    if (programObject == 0)
+        return 0;
 
-   // Check the link status
-   glGetProgramiv ( programObject, GL_LINK_STATUS, &linked );
+    glAttachShader(programObject, vertexShader);
+    glAttachShader(programObject, fragmentShader);
 
-   if ( !linked ) 
-   {
-      GLint infoLen = 0;
+    // Link the program
+    glLinkProgram(programObject);
 
-      glGetProgramiv ( programObject, GL_INFO_LOG_LENGTH, &infoLen );
-      
-      if ( infoLen > 1 )
-      {
-         char* infoLog = malloc (sizeof(char) * infoLen );
+    // Check the link status
+    glGetProgramiv(programObject, GL_LINK_STATUS, &linked);
 
-         glGetProgramInfoLog ( programObject, infoLen, NULL, infoLog );
-         esLogMessage ( "Error linking program:\n%s\n", infoLog );            
-         
-         free ( infoLog );
-      }
+    if (!linked) {
+        GLint infoLen = 0;
 
-      glDeleteProgram ( programObject );
-      return 0;
-   }
+        glGetProgramiv(programObject, GL_INFO_LOG_LENGTH, &infoLen);
 
-   // Free up no longer needed shader resources
-   glDeleteShader ( vertexShader );
-   glDeleteShader ( fragmentShader );
- 
-   return programObject;
+        if (infoLen > 1) {
+            char* infoLog = malloc(sizeof (char) * infoLen);
+
+            glGetProgramInfoLog(programObject, infoLen, NULL, infoLog);
+            esLogMessage("Error linking program:\n%s\n", infoLog);
+
+            free(infoLog);
+        }
+
+        glDeleteProgram(programObject);
+        return 0;
+    }
+
+    // Free up no longer needed shader resources
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    return programObject;
 }

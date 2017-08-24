@@ -1,4 +1,5 @@
 #include "gps.h"
+#include <syslog.h>
 
 /**
  * Rescale a fixed-point value to a different scale. Rounds towards zero.
@@ -665,7 +666,7 @@ void nmea(char *line, GPS_T *data) {
 
                 strftime(buffer, 80, "%d.%m.%Y %H:%M", &tm2);
                 printf(INDENT_SPACES "date/time: %s\n", buffer);
-                */
+                 */
                 /*printf(INDENT_SPACES "raw coordinates and speed: (%d/%d,%d/%d) %d/%d\n",
                         frame.latitude.value, frame.latitude.scale,
                         frame.longitude.value, frame.longitude.scale,
@@ -737,7 +738,7 @@ unsigned char rx_buffer[BUFFER_LEN] = {0};
 int rx_asd = 0;
 
 void gps_open(int *uart0_filestream, char *uart_dev) {
-    *uart0_filestream = open("/dev/ttyAMA0", O_RDONLY | O_NOCTTY | O_NDELAY);
+    *uart0_filestream = open(uart_dev, O_RDONLY | O_NOCTTY | O_NDELAY);
 
     if (*uart0_filestream == -1) {
         printf("Error - Unable to open UART.\n");
@@ -759,10 +760,13 @@ void gps_open(int *uart0_filestream, char *uart_dev) {
 void gps_read(int *uart0_filestream, GPS_T *data) {
     int rx_length = read(*uart0_filestream, (void*) &rx_buffer[rx_asd], BUFFER_LEN - 1);
 
-    if (rx_length > 0) {
+    if ((rx_asd + rx_length) > BUFFER_LEN) {
+        rx_asd = 0;
+    } else if (rx_length > 0) {
         rx_asd += rx_length;
 
-        char *e = &rx_buffer[0], *s = &rx_buffer[0];
+        char *e = &rx_buffer[0];
+        char *s = &rx_buffer[0];
 
         while (e != NULL) {
             e = strchr(e, 13);

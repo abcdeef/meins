@@ -17,9 +17,9 @@
 #include "util.h"
 #include "gui.h"
 #include "obd.h"
-#include "i2c.h"
 #include "gps.h"
 #include "gpio.h"
+#include "sensor.h"
 
 #ifdef __SSE__
 #include <xmmintrin.h>
@@ -29,40 +29,55 @@
 #include "esUtil_raspi.h"
 #define OBD_SERIAL "/dev/rfcomm0"
 #define RSIZE 5
+#define HOME "/home/pi/"
 #else
 #include "esUtil.h"
 #define OBD_SERIAL "/dev/pts/18"
 #define RSIZE 3
+#define HOME "/home/florian/"
 #endif
 
-#define BUFFER_OFFSET(i) ((void *) NULL + (2*i))
+#define BUFFER_OFFSET(i) ((void *) NULL + (2*(i)))
 #define ROUND(x) roundf(x*10)/10
-#define MEM(x) (int)(x * 256 )
+//#define MEM(x) (int)(x * 256 )
 #define PRINTF(...) fprintf(sout,__VA_ARGS__);fprintf(stdout,__VA_ARGS__)
 #define PRINTGLERROR printOglError(__FILE__, __LINE__);
 #ifdef __TM__
-#define TM(START,END,...) clock_gettime(CLOCK_MONOTONIC, &END);ms = (END.tv_sec - START.tv_sec) * 1000 + (END.tv_nsec - START.tv_nsec) * 1e-6;printf("\r%ims\n",ms);
+#define TM(START,END,...) clock_gettime(CLOCK_MONOTONIC, &END);printf("\r%lims\n",(END.tv_sec - START.tv_sec) * 1000 + (END.tv_nsec - START.tv_nsec) / 1000000);
 #else
 #define TM(START, END,...) 
 #endif
 
 #define BUFF_INDEX_GUI 0
 #define BUFF_INDEX_TXT 1
-#define BUFFER_VERTS 2
-#define BUFFER_INDEX 3
+#define BUFFER_VERTS_REIS 2
+#define BUFFER_INDEX_REIS 3
+#define BUFFER_VERTS_YAMA 4
+#define BUFFER_INDEX_YAMA 5
+#define BUFFER_VERTS_WERDER 6
+#define BUFFER_INDEX_WERDER 7
+#define BUFFER_DREIECK 14
 
-#define FBO_WIDTH 1024
-#define FBO_HEIGHT 1024
+//#define FBO_WIDTH 1024
+//#define FBO_HEIGHT 1024
 
-FILE *gps_out, *gps_in;
-FILE *sout;
+FILE *gps_out, *gps_in, *sout, *pos;
+
+unsigned char tmp_gl_mode[] = {0, GL_TRIANGLES, GL_TRIANGLES, GL_LINES};
+
+ESContext esContext;
 
 float trans_x = 0.0f, trans_y = 0.0f, trans_z = 0.0f, orto1 = 0.0f, orto2 = 0.0f, orto3 = 0.0f, orto4 = 0.0f;
 
 char line1_str[21];
 char line2_str[21];
 
-sqlite3 *db;
+sqlite3 *db_2, *db_3;
+
+enum GUI_MODE {
+    _2D_, _3D_, _GUI_
+};
+enum GUI_MODE gui_mode = _3D_;
 
 typedef struct {
     int id;
@@ -70,50 +85,56 @@ typedef struct {
     GLsizei len;
     GLfloat r, g, b;
     int osm_id;
+    unsigned char gl_mode;
+    float glLineWidth;
+    unsigned char typ;
 } T_V_E;
 
-typedef struct {
-    GLsizei len;
-    GLfloat r, g, b;
-    unsigned short *index;
-} T_V_F;
-
-#define BR 8.0
-//float BR = 0.5f;
+#define V_Z_DEFAULT 1.2f
+float BR = 4.0f;
+float T_Y = V_Z_DEFAULT;
 float ORTHO = 2.0f;
 
 #define Y_LEN 10000
 #define V_LEN 65536
-static GLfloat verts[3 * V_LEN] = {0.0f};
+#define F_LEN 20
+//static GLfloat verts[3 * V_LEN] = {0.0f};
+//static float verts_F[5 * V_LEN] = {0.0f};
+static float verts_F_yama[5 * V_LEN] = {0.0f}, verts_F_werder[5 * V_LEN] = {0.0f}, verts_F_reis[5 * V_LEN] = {0.0f};
+//static int verts_L[3 * V_LEN] = {0};
 unsigned short verts_len = 0;
 ////////////////////////////////
-static T_V_E yama[Y_LEN];
-static unsigned short yama_index[V_LEN];
-unsigned short yama_len = 0, yama_index_len = 0;
+//static T_V_E yama[Y_LEN];
+static unsigned short index_yama[V_LEN], index_werder[V_LEN], index_reis[V_LEN];
+unsigned short index_yama_len = 0, index_werder_len = 0, index_reis_len = 0;
 /////////////////////////
-static T_V_E werder[Y_LEN];
-unsigned short werder_len = 0;
+//static T_V_E werder[Y_LEN];
+//unsigned short werder_len = 0;
 /////////////////////////
-static GLfloat tmp_verts[V_LEN] = {0.0f};
-static T_V_E tmp_yama[Y_LEN];
-unsigned short tmp_vert_len, tmp_yama_len, tmp_werder_len, tmp_reis_len;
+//static GLfloat tmp_verts[V_LEN] = {0.0f};
+//static T_V_E tmp_yama[Y_LEN];
+//unsigned short tmp_vert_len, tmp_yama_len, tmp_werder_len, tmp_reis_len;
+static unsigned short tmp_index_yama[V_LEN], tmp_index_werder[V_LEN], tmp_index_reis[V_LEN];
+unsigned short tmp_index_yama_len = 0, tmp_index_reis_len = 0, tmp_index_werder_len = 0;
+
 ///////////////////////////////
-T_V_E farbe[20];
+T_V_E farbe_yama[F_LEN], farbe_werder[F_LEN], farbe_reis[F_LEN], tmp_farbe_reis[F_LEN], tmp_farbe_yama[F_LEN], tmp_farbe_werder[F_LEN], markierung;
 unsigned short farbe_yama_len = 0, farbe_reis_len = 0, farbe_werder_len = 0;
-;
+unsigned short tmp_farbe_werder_len = 0, tmp_farbe_reis_len = 0, tmp_farbe_yama_len = 0;
+
+
+unsigned short verts_yama_len = 0, verts_werder_len = 0, verts_reis_len = 0;
 ////////////////////
-static T_V_E reis[Y_LEN];
-static unsigned short reis_index[V_LEN];
-unsigned short reis_len = 0, reis_index_len = 0;
+//static T_V_E reis[Y_LEN];
+//static unsigned short reis_index[V_LEN];
+//unsigned short reis_len = 0, reis_index_len = 0;
 
 int sqc_tmp;
 
 void setPOS(ESContext *esContext);
-static int sqc_yama(void *a, int argc, char **argv, char **azColName);
-static int sqc_yama2(void *a, int argc, char **argv, char **azColName);
-static int sqc_vertex(void *NotUsed, int argc, char **argv, char **azColName);
-static int sqc_count(void *out_var, int argc, char **argv, char **azColName);
-static int sqc_farbe(void *a, int argc, char **argv, char **azColName);
+static int sqc_vertex_lvl2(void *a, int argc, char **argv, char **azColName);
+static int sqc_vertex_lvl3(void *a, int argc, char **argv, char **azColName);
+static int sqc_vertex3(void *a, int argc, char **argv, char **azColName);
 
 void printM4(ESMatrix *wg);
 void ShutDown(int signum);
@@ -129,48 +150,57 @@ float rad2deg;
 int dx = 0, dy = 0, m_n, m_m, p_n, p_m;
 GLuint *tmp;
 //static struct fixsource_t source;
-ESMatrix perspective, modelview, mvpMatrix, mvpTex;
+ESMatrix perspective, modelview, mvpMatrix, mvpDreieck;
 
 unsigned int stride;
 float gps_status[3] = {1.0f, 0.0f, 0.0f};
 
-unsigned short new_tex = 0;
+unsigned short new_tex_lvl1 = 0, new_tex_lvl2 = 0, new_tex_lvl3 = 0;
 pthread_mutex_t m_pinto = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t m_deto = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_deto_lvl2 = PTHREAD_MUTEX_INITIALIZER, mutex_deto_lvl3 = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
     GLuint programMap;
-    GLuint programFBO;
+    GLuint programWERDER;
     GLuint programGUI;
     GLuint programKreis;
-    GLuint programTex;
+    GLuint programDreieck;
+    GLuint positionLocWERDERH;
+    GLuint positionLocWERDERL;
+    GLuint colorLocWERDER;
+    GLuint mvpLocWERDER;
+    GLuint offsetHLocWERDER;
+    GLuint offsetLLocWERDER;
+    GLuint MapoffsetLocWERDER;
 
     // Attribute locations
     GLint positionLocGui;
     GLint positionLocKreis;
     GLint texCoordLocKreis;
     GLint positionLocMap;
-    GLint positionLocFBO;
-    GLint offsetLLocMap;
-    GLint offsetLLocFBO;
+    GLint positionLocMapH;
+    GLint positionLocMapL;
+
+    GLint offsetHLocMap;
     GLint offsetLLocTex;
-    GLint offsetMLocMap;
+    GLint offsetLLocMap;
     GLint offsetMLocMap2;
     GLint offsetMLocTex;
+    GLint MapoffsetLocDreieck;
+    GLint colorLocDreieck;
+    GLint MapoffsetLocMap;
     GLint texCoordLocGui;
     GLint colorLocMap;
-    GLint colorLocFBO;
     GLint texLocGui;
     GLint samplerLocGui;
     GLint samplerLocTex;
-    GLint positionLocTex;
+    GLint positionLocDreieck;
     GLint texCoordLocTex;
 
     // Uniform locations
     GLint mvpLocMap;
-    GLint mvpLocFBO;
     GLint colorLocGPS_I;
-    GLint mvpLocTex;
+    GLint AngleLocDreieck;
 
     // Vertex data
     GLfloat *vertices;
@@ -203,6 +233,8 @@ typedef struct {
 #endif
     //Buffer
     GLuint buffindex[20];
+    GLuint vao[10];
+
 } UserData;
 
 typedef struct {
@@ -215,6 +247,8 @@ typedef struct {
     float v_x;
     float v_y;
     float v;
+    float o_x;
+    float o_y;
     float angle;
     double gps_longitude;
     double gps_latitude;
@@ -235,6 +269,8 @@ typedef struct {
     short i2c_z;
 
     float obd_volt;
+    float i2c_hum;
+    float i2c_temp;
 } POS_T;
 
 int printOglError(char *file, int line) {
@@ -374,7 +410,7 @@ void upload_tex(ESContext *esContext) {
     posData->gpu_t_y = posData->t_y;
     PRINTF("upload_tex:  %i %i  %f %f\n", posData->t_x, posData->t_y, posData->g_x, posData->g_y);
 
-    new_tex = 0;
+    new_tex_lvl2 = 0;
 }
 
 /*
@@ -409,130 +445,38 @@ int load_tex_images(ESContext *esContext) {
 int Init(ESContext *esContext) {
     UserData *userData = esContext->userData;
 
-    PRINTF("\r%s\n", glGetString(GL_VERSION));
-    PRINTF("\r%s\n", glGetString(GL_VENDOR));
-    PRINTF("\r%s\n", glGetString(GL_RENDERER));
-    PRINTF("\r%s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+    PRINTF("\r%s\n\r%s\n\r%s\n\r%s\n", glGetString(GL_VERSION), glGetString(GL_VENDOR), glGetString(GL_RENDERER), glGetString(GL_SHADING_LANGUAGE_VERSION));
 
-    const char *v2 = "attribute vec4 a_position; \n"
-            "attribute vec2 a_texCoord;          \n"
-            "varying vec2 v_texCoord;            \n"
-            "void main()                         \n"
-            "{                                   \n"
-            "   gl_Position = a_position;        \n"
-            "   v_texCoord = a_texCoord;         \n"
-            "}                                   \n";
+    char *f4, *v7, *f2, *f3, *v2, *v4, *f5, *v5;
+    LoadGLSL(&f2, HOME "GLSL/f2.glsl");
+    LoadGLSL(&v2, HOME "GLSL/v2.glsl");
+    LoadGLSL(&f3, HOME "GLSL/f3.glsl");
+    LoadGLSL(&f4, HOME "GLSL/f4.glsl");
+    LoadGLSL(&v4, HOME "GLSL/v4.glsl");
+    LoadGLSL(&v5, HOME "GLSL/v5.glsl");
+    LoadGLSL(&f5, HOME "GLSL/f5.glsl");
+    LoadGLSL(&v7, HOME "GLSL/v7.glsl");
 
-    const char *f2 = "precision mediump float;                   \n"
-            "varying vec2 v_texCoord;                            \n"
-            "uniform sampler2D s_texture;                        \n"
-            "void main()                                         \n"
-            "{                                                   \n"
-            "  gl_FragColor = texture2D( s_texture, v_texCoord );\n"
-            "}                                                   \n";
-
-    const char *v3 = "attribute vec4 a_position;     \n"
-            "attribute vec2 a_texCoord;          \n"
-            "varying vec2 v_texCoord;            \n"
-            "void main()                         \n"
-            "{                                   \n"
-            "   gl_Position = a_position;        \n"
-            "   v_texCoord = a_texCoord;         \n"
-            "}                                   \n";
-
-    const char *f3 = "precision mediump float;                      \n"
-            "varying vec2 v_texCoord;                               \n"
-            "uniform vec3 u_f;                                      \n"
-            "void main()                                            \n"
-            "{                                                      \n"
-            "  float dis = distance(v_texCoord, vec2(0.5, 0.5));                                  \n"
-            "  gl_FragColor = dis > 0.5 ? vec4(0.0,0.0,0.0,0.0) : vec4(u_f.x,u_f.y,u_f.z,1.0);    \n"
-            "}                                                      \n";
-    const char *v4 = "#version 100               \n"
-            "attribute vec4 a_position;          \n"
-            "attribute vec3 a_color;             \n"
-            "uniform mat4 u_mvpMatrix;           \n"
-            "uniform ivec2 u_offsetL;            \n"
-            "uniform ivec2 u_offsetM;            \n"
-            "void main()                         \n"
-            "{                                   \n"
-            "   gl_Position = a_position;                             \n"
-            "   gl_Position.x -= float(u_offsetL.x);                  \n"
-            "   gl_Position.x -= float(u_offsetM.x)/float(1000000);   \n"
-            "   gl_Position.y = float(u_offsetL.y) - gl_Position.y;   \n"
-            "   gl_Position.y += (float(u_offsetM.y)/float(1000000));   \n"
-            "   gl_Position  *= u_mvpMatrix;     \n"
-            "   gl_Position.y -= 0.3;            \n"
-            "}                                   \n";
-    const char *f4 = "#version 100\n"
-            "precision mediump float;                      \n"
-            "uniform vec3 u_color;                                  \n"
-            "void main()                                            \n"
-            "{                                                      \n"
-            "  gl_FragColor = vec4(u_color.x,u_color.y,u_color.z,1.0);                \n"
-            "}                                                      \n";
-
-    const char *v5 = "#version 100               \n"
-            "attribute vec4 a_position;          \n"
-            "uniform mat4 u_mvpMatrix;           \n"
-            "uniform ivec2 u_offsetL;            \n"
-            "void main()                         \n"
-            "{                                   \n"
-            "   gl_Position = a_position;        \n"
-            "   gl_Position.x = gl_Position.x - float(u_offsetL.x);      \n"
-            "   gl_Position.y -= float(u_offsetL.y);    \n"
-            "   gl_Position  *= u_mvpMatrix;     \n"
-            //"   gl_Position.z -= 1.0;"
-            "}                                   \n";
-    const char *f5 = "#version 100              \n"
-            "precision mediump float;            \n"
-            "uniform vec3 u_color;               \n"
-            "void main()                         \n"
-            "{                                   \n"
-            "  gl_FragColor = vec4(u_color.x,u_color.y,u_color.z,1.0);                \n"
-            "}                                                      \n";
-
-    const char *v6 = "#version 100               \n"
-            "attribute vec4 a_position;          \n"
-            "attribute vec2 a_texCoord;          \n"
-            "varying vec2 v_texCoord;            \n"
-            "uniform mat4 u_mvpMatrix;           \n"
-            "uniform ivec2 u_offsetL;            \n"
-            "uniform ivec2 u_offsetM;            \n"
-            "void main()                         \n"
-            "{                                   \n"
-            "   gl_Position = a_position;        \n"
-            "   gl_Position.x = gl_Position.x - float(u_offsetL.x);      \n"
-            //"   gl_Position.x -= float(u_offsetM.x)/float(1000000);   \n"
-            "   gl_Position.y -= float(u_offsetL.y);    \n"
-            //"   gl_Position.y += (float(u_offsetM.y)/float(1000000));   \n"
-            "   gl_Position  *= u_mvpMatrix;     \n"
-            //"   gl_Position.y -= 0.3;            \n"
-            "   v_texCoord = a_texCoord;         \n"
-            "}                                   \n";
-    const char *f6 = "precision mediump float;                   \n"
-            "varying vec2 v_texCoord;                            \n"
-            "uniform sampler2D s_texture;                        \n"
-            "void main()                                         \n"
-            "{                                                   \n"
-            "  gl_FragColor = texture2D( s_texture, v_texCoord );\n"
-            "}                                                   \n";
-
-    // Load the shaders and get a linked program object
     userData->programGUI = esLoadProgram(v2, f2);
-    userData->programKreis = esLoadProgram(v3, f3);
+    userData->programKreis = esLoadProgram(v2, f3);
     userData->programMap = esLoadProgram(v4, f4);
-    userData->programFBO = esLoadProgram(v5, f5);
-    userData->programTex = esLoadProgram(v6, f6);
+    userData->programWERDER = esLoadProgram(v5, f5);
+    userData->programDreieck = esLoadProgram(v7, f4);
 
-    userData->positionLocTex = glGetAttribLocation(userData->programTex, "a_position");
-    userData->texCoordLocTex = glGetAttribLocation(userData->programTex, "a_texCoord");
-    userData->mvpLocTex = glGetUniformLocation(userData->programTex, "u_mvpMatrix");
-    userData->samplerLocTex = glGetUniformLocation(userData->programTex, "s_texture");
-    userData->offsetLLocTex = glGetUniformLocation(userData->programTex, "u_offsetL");
-    userData->offsetMLocTex = glGetUniformLocation(userData->programTex, "u_offsetM");
-    glEnableVertexAttribArray(userData->positionLocTex);
-    glEnableVertexAttribArray(userData->texCoordLocTex);
+    free(f2);
+    free(v2);
+    free(f3);
+    free(f4);
+    free(v4);
+    free(f5);
+    free(v5);
+    free(v7);
+
+    userData->positionLocDreieck = glGetAttribLocation(userData->programDreieck, "a_position");
+    userData->AngleLocDreieck = glGetUniformLocation(userData->programDreieck, "u_angle");
+    userData->MapoffsetLocDreieck = glGetUniformLocation(userData->programDreieck, "u_mapOffset");
+    userData->colorLocDreieck = glGetUniformLocation(userData->programDreieck, "u_color");
+    glEnableVertexAttribArray(userData->positionLocDreieck);
 
     userData->positionLocGui = glGetAttribLocation(userData->programGUI, "a_position");
     userData->texCoordLocGui = glGetAttribLocation(userData->programGUI, "a_texCoord");
@@ -547,18 +491,25 @@ int Init(ESContext *esContext) {
     glEnableVertexAttribArray(userData->positionLocKreis);
     glEnableVertexAttribArray(userData->texCoordLocKreis);
 
-    userData->positionLocMap = glGetAttribLocation(userData->programMap, "a_position");
+    userData->positionLocMapH = glGetAttribLocation(userData->programMap, "a_posH");
+    userData->positionLocMapL = glGetAttribLocation(userData->programMap, "a_posL");
     userData->colorLocMap = glGetUniformLocation(userData->programMap, "u_color");
     userData->mvpLocMap = glGetUniformLocation(userData->programMap, "u_mvpMatrix");
+    userData->offsetHLocMap = glGetUniformLocation(userData->programMap, "u_offsetH");
     userData->offsetLLocMap = glGetUniformLocation(userData->programMap, "u_offsetL");
-    userData->offsetMLocMap = glGetUniformLocation(userData->programMap, "u_offsetM");
-    glEnableVertexAttribArray(userData->positionLocMap);
+    userData->MapoffsetLocMap = glGetUniformLocation(userData->programMap, "u_mapOffset");
+    glEnableVertexAttribArray(userData->positionLocMapH);
+    glEnableVertexAttribArray(userData->positionLocMapL);
 
-    userData->positionLocFBO = glGetAttribLocation(userData->programFBO, "a_position");
-    userData->colorLocFBO = glGetUniformLocation(userData->programFBO, "u_color");
-    userData->mvpLocFBO = glGetUniformLocation(userData->programFBO, "u_mvpMatrix");
-    userData->offsetLLocFBO = glGetUniformLocation(userData->programFBO, "u_offsetL");
-    glEnableVertexAttribArray(userData->positionLocFBO);
+    userData->positionLocWERDERH = glGetAttribLocation(userData->programWERDER, "a_posH");
+    userData->positionLocWERDERL = glGetAttribLocation(userData->programWERDER, "a_posL");
+    userData->colorLocWERDER = glGetUniformLocation(userData->programWERDER, "u_color");
+    userData->mvpLocWERDER = glGetUniformLocation(userData->programWERDER, "u_mvpMatrix");
+    userData->offsetHLocWERDER = glGetUniformLocation(userData->programWERDER, "u_offsetH");
+    userData->offsetLLocWERDER = glGetUniformLocation(userData->programWERDER, "u_offsetL");
+    userData->MapoffsetLocWERDER = glGetUniformLocation(userData->programWERDER, "u_mapOffset");
+    glEnableVertexAttribArray(userData->positionLocWERDERH);
+    glEnableVertexAttribArray(userData->positionLocWERDERL);
 
     glGenBuffers(20, &userData->buffindex[0]);
     // NICHT LÖSCHEN! der raspi  brauch das
@@ -568,38 +519,10 @@ int Init(ESContext *esContext) {
     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
     glBufferData(GL_ARRAY_BUFFER, sizeof (buttons), buttons, GL_STATIC_DRAW);
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX]);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    //glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX_REIS]);
+    //glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-    // Generate the vertex data
-#ifdef __NEW_MESH__
-    userData->numIndices =
-            esGenMesh2(SCALE, userData->r_width, userData->r_height, &userData->vertices, &userData->texCoord, &userData->indices);
-    glGenBuffers(1, &userData->buffindex[0]);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[0]);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, userData->numIndices * sizeof (unsigned int), &userData->indices[0],
-            GL_STATIC_DRAW);
-    //glBufferData(GL_ARRAY_BUFFER, (userData->r_width + 1) * (userData->r_height + 1) * 3 * sizeof(GLfloat), &userData->vertices[0], GL_STATIC_DRAW);
-    glGenTextures(1, &userData->texindex[0]);
-    glBindTexture(GL_TEXTURE_2D, userData->texindex[0]);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-#else
-    /*
-     userData->numIndices = esGenMesh(SCALE, userData->r_width, userData->r_height, &userData->vertices, &userData->texCoord, NULL);
-     glGenTextures(userData->tiles, &userData->texindex[0]);
-     unsigned short n = 0;
-     for (n = 0; n < userData->tiles; n++) {
-     glBindTexture( GL_TEXTURE_2D, userData->texindex[userData->texMap[n]]);
-     glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-     glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-     glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-     glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-     }
-     */
-#endif
+
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_BLEND);
     glGenTextures(sizeof (gui_tex_index) / sizeof (unsigned int), &gui_tex_index[0]);
@@ -641,44 +564,6 @@ int Init(ESContext *esContext) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
-
-#ifdef __FBO__
-    GLint maxRenderbufferSize;
-    glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbufferSize);
-    PRINTF("\rGL_MAX_RENDERBUFFER_SIZE: %ix%i\n", maxRenderbufferSize, maxRenderbufferSize);
-    if ((maxRenderbufferSize <= FBO_WIDTH) || (maxRenderbufferSize <= FBO_HEIGHT)) {
-        printf("Cannot use framebuffer objects!\n");
-        exit(EXIT_FAILURE);
-    }
-
-    glGenFramebuffers(1, &userData->FramebufferName);
-    glGenTextures(1, &userData->renderedTexture);
-    glGenRenderbuffers(1, &userData->depthrenderbuffer);
-
-    glBindTexture(GL_TEXTURE_2D, userData->renderedTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, FBO_WIDTH, FBO_HEIGHT,
-            0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-    glBindRenderbuffer(GL_RENDERBUFFER, userData->depthrenderbuffer);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, FBO_WIDTH, FBO_HEIGHT);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, userData->FramebufferName);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, userData->renderedTexture, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, userData->depthrenderbuffer);
-
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    if (status != GL_FRAMEBUFFER_COMPLETE) {
-        printf("Framebuffer object is not complete!\n");
-        exit(EXIT_FAILURE);
-    }
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glBindRenderbuffer(GL_RENDERBUFFER, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-#endif
 
     glViewport(0, -160, 800, 800);
     PRINTGLERROR
@@ -752,33 +637,19 @@ void intro(ESContext *esContext) {
     usleep(800000);
 }
 
-void map(UserData *userData) {
-    // Residential
-    for (unsigned short m_n = 0; m_n < farbe_reis_len; m_n++) {
-        glUniform3f(userData->colorLocMap, farbe[m_n].r, farbe[m_n].g, farbe[m_n].b);
-        glDrawElements(GL_TRIANGLES, farbe[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe[m_n].index));
-    }
-    // Flächen
-    for (unsigned short m_n = farbe_reis_len; m_n < farbe_yama_len; m_n++) {
-        glUniform3f(userData->colorLocMap, farbe[m_n].r, farbe[m_n].g, farbe[m_n].b);
-        glDrawElements(GL_TRIANGLES, farbe[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe[m_n].index));
-    }
-    // Wege
-    glLineWidth(5.0f);
-    for (unsigned short m_n = farbe_yama_len; m_n < farbe_werder_len; m_n++) {
-        glUniform3f(userData->colorLocMap, farbe[m_n].r, farbe[m_n].g, farbe[m_n].b);
-        glDrawElements(GL_LINES, farbe[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe[m_n].index));
-    }
-    PRINTGLERROR
-}
-
-void Update(ESContext *esContext, float deltaTime) {
+void Update2(ESContext *esContext, float deltaTime) {
     UserData *userData = ((ESContext*) esContext)->userData;
     POS_T *posData = ((ESContext*) esContext)->posData;
+    float dAngle = 0.0f;
+    float mAngle = posData->angle * rad2deg;
 
     esMatrixLoadIdentity(&modelview);
-    esRotate(&modelview, posData->angle, 0.0, 0.0, 1.0);
-    esTranslate(&modelview, 0.0f, V_Z, 0.0f);
+    if (gui_mode == _3D_) {
+        esRotate(&modelview, mAngle, 0.0, 0.0, 1.0);
+    } else if (gui_mode == _2D_) {
+        dAngle = mAngle;
+    }
+    esTranslate(&modelview, 0.0f, T_Y, 0.0f);
 
 #ifdef __SSE__
     __m128 row1 = _mm_load_ps(&perspective.m[0][0]);
@@ -799,42 +670,262 @@ void Update(ESContext *esContext, float deltaTime) {
     esMatrixMultiply(&mvpMatrix, &modelview, &perspective);
 #endif
 
-    posData->v_x = sinf(posData->angle * rad2deg) * posData->v;
-    posData->v_y = cosf(posData->angle * rad2deg) * posData->v;
+    /*posData->v_x = sinf(mAngle) * posData->v;
+    posData->v_y = cosf(mAngle) * posData->v;
+
+    posData->g_x += deltaTime * posData->v_x / 3600.0f / posData->osmS;
+    posData->g_y -= deltaTime * posData->v_y / 3600.0f / posData->osmS;
+     */
+    // DRAW
+    /* glClear(GL_COLOR_BUFFER_BIT);
+
+     glUseProgram(userData->programMap);
+     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS]);
+     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX]);
+
+     pthread_mutex_lock(&m_deto);
+
+     if (new_tex == 1) {
+         glBufferData(GL_ARRAY_BUFFER, 20 * verts_len, verts_F, GL_DYNAMIC_DRAW);
+         glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_yama_len * sizeof (short), yama_index, GL_DYNAMIC_DRAW);
+         new_tex = 0;
+     }
+
+     glUniformMatrix4fv(userData->mvpLocMap, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
+     glUniform2f(userData->offsetHLocMap, floor(posData->g_x), floor(posData->g_y));
+     glUniform2f(userData->offsetLLocMap, 0.0f, 0.0f);
+     glUniform2f(userData->MapoffsetLocMap, posData->o_x, posData->o_y);
+     glVertexAttribPointer(userData->positionLocMapH, 3, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) 0);
+     glVertexAttribPointer(userData->positionLocMapL, 2, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) (3 * sizeof (GL_FLOAT)));
+
+     float color[] = {1.0f, 0.0f, 0.0f,
+         0.0f, 1.0f, 0.0f,
+         0.0f, 0.0f, 1.0f,
+         1.0f, 0.0f, 1.0f,
+         0.0f, 1.0f, 1.0f};
+
+     //if (farbe_werder_len > 0) {
+     for (int m = 0; m < farbe_werder_len; m++) {
+         for (int n = 0; n < (farbe[m].len / 3); n++) {
+             int c = (n % (sizeof (color) / sizeof (float) / 3))*3;
+
+             glUniform3f(userData->colorLocMap, color[c], color[c + 1], color[c + 2]);
+             glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, BUFFER_OFFSET(3 * n));
+
+
+             //glLineWidth(2.0f);
+
+             //glUniform3f(userData->colorLocMap, 0.0f, 0.0f, 0.0f);
+             //glDrawElements(GL_LINE_LOOP, 3, GL_UNSIGNED_SHORT, BUFFER_OFFSET(3 * n));
+
+
+         }
+         //glUniform3f(userData->colorLocMap, 0.0f, 0.0f, 1.0f);
+         //glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, BUFFER_OFFSET(12));
+
+     }
+     pthread_mutex_unlock(&m_deto);
+     PRINTGLERROR*/
+
+    /*
+        // Markierungen
+        glLineWidth(5.0f);
+        glUniform3f(userData->colorLocMap, markierung.r, markierung.g, markierung.b);
+        glDrawElements(GL_LINES, markierung.len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(markierung.index));
+        PRINTGLERROR
+
+        // Dreieck
+        glUseProgram(userData->programDreieck);
+        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
+        glUniform1f(userData->AngleLocDreieck, dAngle);
+        glUniform2f(userData->MapoffsetLocDreieck, posData->o_x, posData->o_y);
+        glUniform3f(userData->colorLocDreieck, 1.0f, 0.0f, 0.0f);
+        glVertexAttribPointer(userData->positionLocDreieck, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        PRINTGLERROR
+
+        // GUI
+        glUseProgram(userData->programGUI);
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1i(userData->samplerLocGui, 0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
+        glVertexAttribPointer(userData->positionLocGui, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
+        glVertexAttribPointer(userData->texCoordLocGui, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
+        // Buttons
+        glBindTexture(GL_TEXTURE_2D, gui_tex_index[0]);
+        glDrawArrays(GL_TRIANGLE_STRIP, 3, 4);
+        glBindTexture(GL_TEXTURE_2D, gui_tex_index[1]);
+        glDrawArrays(GL_TRIANGLE_STRIP, 7, 4);
+        glBindTexture(GL_TEXTURE_2D, gui_tex_index[3]);
+        glDrawArrays(GL_TRIANGLE_STRIP, 11, 4);
+     */
+    // Text
+    //renderInt(userData, posData->obd_speed, -1.0f, 0.54f);
+    //renderFloat(userData, posData->g_x, -1.0f, 0.54f);
+    //renderFloat(userData, posData->g_y, -1.0f, 0.4f);
+    /*
+        // GPS_I
+        glUseProgram(userData->programKreis);
+        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
+        glVertexAttribPointer(userData->positionLocKreis, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
+        glVertexAttribPointer(userData->texCoordLocKreis, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
+        glUniform3f(userData->colorLocGPS_I, gps_status[0], gps_status[1], gps_status[2]);
+        glDrawArrays(GL_TRIANGLE_STRIP, 15, 4);
+        PRINTGLERROR
+     */
+}
+
+void Update(ESContext *esContext, float deltaTime) {
+    UserData *userData = ((ESContext*) esContext)->userData;
+    POS_T *posData = ((ESContext*) esContext)->posData;
+    float dAngle = 0.0f;
+    float mAngle = posData->angle * rad2deg;
+
+    esMatrixLoadIdentity(&modelview);
+    if (gui_mode == _3D_) {
+        //printf("%f\n",mAngle);
+        esRotate(&modelview, mAngle, 0.0, 0.0, 1.0);
+    } else if (gui_mode == _2D_) {
+        dAngle = mAngle;
+    }
+    esTranslate(&modelview, 0.0f, T_Y, 0.0f);
+
+#ifdef __SSE__
+    __m128 row1 = _mm_load_ps(&perspective.m[0][0]);
+    __m128 row2 = _mm_load_ps(&perspective.m[1][0]);
+    __m128 row3 = _mm_load_ps(&perspective.m[2][0]);
+    __m128 row4 = _mm_load_ps(&perspective.m[3][0]);
+    for (m_m = 0; m_m < 4; m_m++) {
+        __m128 brod1 = _mm_set1_ps(modelview.m[m_m][0]);
+        __m128 brod2 = _mm_set1_ps(modelview.m[m_m][1]);
+        __m128 brod3 = _mm_set1_ps(modelview.m[m_m][2]);
+        __m128 brod4 = _mm_set1_ps(modelview.m[m_m][3]);
+        __m128 row =
+                _mm_add_ps(_mm_add_ps(_mm_mul_ps(brod1, row1), _mm_mul_ps(brod2, row2)), _mm_add_ps(_mm_mul_ps(brod3, row3), _mm_mul_ps(brod4, row4)));
+
+        _mm_store_ps(&mvpMatrix.m[m_m][0], row);
+    }
+#else
+    esMatrixMultiply(&mvpMatrix, &modelview, &perspective);
+#endif
+
+    posData->v_x = sinf(mAngle) * posData->v;
+    posData->v_y = cosf(mAngle) * posData->v;
 
     posData->g_x += deltaTime * posData->v_x / 3600.0f / posData->osmS;
     posData->g_y -= deltaTime * posData->v_y / 3600.0f / posData->osmS;
 
-    posData->t_x = (int) floor(posData->g_x);
-    posData->t_y = (int) floor(posData->g_y);
-
-    posData->m_x = (int) floor(fmod(posData->g_x, 1.0f)*1000000.0);
-    posData->m_y = (int) floor(fmod(posData->g_y, 1.0f)*1000000.0);
-
-
     // DRAW
     glClear(GL_COLOR_BUFFER_BIT);
-    glViewport(0, -160, 800, 800);
 
     glUseProgram(userData->programMap);
-    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS]);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX]);
-
-    pthread_mutex_lock(&m_deto);
-
-    if (new_tex == 1) {
-        glBufferData(GL_ARRAY_BUFFER, 12 * verts_len, verts, GL_DYNAMIC_DRAW);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, yama_index_len * sizeof (short), yama_index, GL_DYNAMIC_DRAW);
-        new_tex = 0;
-    }
 
     glUniformMatrix4fv(userData->mvpLocMap, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
-    glUniform2i(userData->offsetLLocMap, posData->t_x, posData->t_y);
-    glUniform2i(userData->offsetMLocMap, posData->m_x, posData->m_y);
-    glVertexAttribPointer(userData->positionLocMap, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) 0);
+    glUniform2f(userData->offsetHLocMap, floor(posData->g_x), floor(posData->g_y));
+    glUniform2f(userData->offsetLLocMap, fmod(posData->g_x, 1.0f), fmod(posData->g_y, 1.0f));
+    glUniform2f(userData->MapoffsetLocMap, posData->o_x, posData->o_y);
 
-    map(userData);
-    pthread_mutex_unlock(&m_deto);
+    /*
+    pthread_mutex_lock(&mutex_deto_lvl2);
+    if (new_tex_lvl2 == 1) {
+        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS_REIS]);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX_REIS]);
+        glBufferData(GL_ARRAY_BUFFER, 20 * verts_reis_len, verts_F_reis, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_reis_len * sizeof (short), index_reis, GL_DYNAMIC_DRAW);
+        
+        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS_YAMA]);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX_YAMA]);
+        glBufferData(GL_ARRAY_BUFFER, 20 * verts_yama_len, verts_F_yama, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_yama_len * sizeof (short), index_yama, GL_DYNAMIC_DRAW);
+
+        glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS_WERDER]);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX_WERDER]);
+        glBufferData(GL_ARRAY_BUFFER, 20 * verts_werder_len, verts_F_werder, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_werder_len * sizeof (short), index_werder, GL_DYNAMIC_DRAW);
+        
+        new_tex_lvl2 = 0;
+        PRINTGLERROR
+    }
+    pthread_mutex_unlock(&mutex_deto_lvl2);
+     */
+    // REIS
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS_REIS]);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX_REIS]);
+
+    glVertexAttribPointer(userData->positionLocMapH, 3, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) 0);
+    glVertexAttribPointer(userData->positionLocMapL, 2, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) (3 * sizeof (GL_FLOAT)));
+
+    for (unsigned short m_n = 0; m_n < farbe_reis_len; m_n++) {
+        //glLineWidth(farbe[m_n].glLineWidth);
+        glUniform3f(userData->colorLocMap, farbe_yama[m_n].r, farbe_yama[m_n].g, farbe_yama[m_n].b);
+        glDrawElements(GL_TRIANGLES, farbe_yama[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe_yama[m_n].index));
+    }
+    PRINTGLERROR
+
+    // YAMA
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS_YAMA]);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX_YAMA]);
+
+    pthread_mutex_lock(&mutex_deto_lvl2);
+    if (new_tex_lvl2 == 1) {
+        glBufferData(GL_ARRAY_BUFFER, 20 * verts_yama_len, verts_F_yama, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_yama_len * sizeof (short), index_yama, GL_DYNAMIC_DRAW);
+        new_tex_lvl2 = 0;
+        PRINTGLERROR
+    }
+    pthread_mutex_unlock(&mutex_deto_lvl2);
+
+    glVertexAttribPointer(userData->positionLocMapH, 3, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) 0);
+    glVertexAttribPointer(userData->positionLocMapL, 2, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) (3 * sizeof (GL_FLOAT)));
+
+    for (unsigned short m_n = 0; m_n < farbe_yama_len; m_n++) {
+        //glLineWidth(farbe[m_n].glLineWidth);
+        glUniform3f(userData->colorLocMap, farbe_yama[m_n].r, farbe_yama[m_n].g, farbe_yama[m_n].b);
+        glDrawElements(GL_TRIANGLES, farbe_yama[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe_yama[m_n].index));
+    }
+    PRINTGLERROR
+
+    // WERDER
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS_WERDER]);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX_WERDER]);
+
+    pthread_mutex_lock(&mutex_deto_lvl3);
+    if (new_tex_lvl3 == 1) {
+        glBufferData(GL_ARRAY_BUFFER, 20 * verts_werder_len, verts_F_werder, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_werder_len * sizeof (short), index_werder, GL_DYNAMIC_DRAW);
+        new_tex_lvl3 = 0;
+        PRINTGLERROR
+    }
+    pthread_mutex_unlock(&mutex_deto_lvl3);
+
+    glVertexAttribPointer(userData->positionLocMapH, 3, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) 0);
+    glVertexAttribPointer(userData->positionLocMapL, 2, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) (3 * sizeof (GL_FLOAT)));
+
+    for (unsigned short m_n = 0; m_n < farbe_werder_len; m_n++) {
+        //glLineWidth(farbe[m_n].glLineWidth);
+        glUniform3f(userData->colorLocMap, farbe_werder[m_n].r, farbe_werder[m_n].g, farbe_werder[m_n].b);
+        glDrawElements(GL_TRIANGLES, farbe_werder[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe_werder[m_n].index));
+    }
+    PRINTGLERROR
+
+    // Markierungen
+    //glLineWidth(5.0f);
+    //glUniform3f(userData->colorLocMap, markierung.r, markierung.g, markierung.b);
+    //glDrawElements(GL_LINES, markierung.len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(markierung.index));
+    PRINTGLERROR
+
+    // Dreieck
+    glUseProgram(userData->programDreieck);
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
+    glUniform1f(userData->AngleLocDreieck, dAngle);
+    glUniform2f(userData->MapoffsetLocDreieck, posData->o_x, posData->o_y);
+    glUniform3f(userData->colorLocDreieck, 0.0f, 0.0f, 0.0f);
+    glVertexAttribPointer(userData->positionLocDreieck, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glUniform3f(userData->colorLocDreieck, 1.0f, 0.0f, 0.0f);
+    glDrawArrays(GL_TRIANGLES, 19, 3);
+    PRINTGLERROR
 
 
     // GUI
@@ -845,9 +936,6 @@ void Update(ESContext *esContext, float deltaTime) {
     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
     glVertexAttribPointer(userData->positionLocGui, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
     glVertexAttribPointer(userData->texCoordLocGui, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
-    // Dreieck
-    glBindTexture(GL_TEXTURE_2D, gui_tex_index[2]);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
     // Buttons
     glBindTexture(GL_TEXTURE_2D, gui_tex_index[0]);
     glDrawArrays(GL_TRIANGLE_STRIP, 3, 4);
@@ -869,6 +957,7 @@ void Update(ESContext *esContext, float deltaTime) {
     glUniform3f(userData->colorLocGPS_I, gps_status[0], gps_status[1], gps_status[2]);
     glDrawArrays(GL_TRIANGLE_STRIP, 15, 4);
     PRINTGLERROR
+
 }
 
 void Key(ESContext *esContext, unsigned char a, int b, int c) {
@@ -877,103 +966,83 @@ void Key(ESContext *esContext, unsigned char a, int b, int c) {
 
     //printf("%i\n", a);
     switch (a) {
-            /*
-            case 52:
-                trans_x = 0.0f;
-                printf("%f %f %f\n", trans_x, trans_y, trans_z);
-                break;
-            case 53:
-                trans_y = 0.0f;
-                printf("%f %f %f\n", trans_x, trans_y, trans_z);
-                break;
-            case 54:
-                trans_z = 0.0f;
-                printf("%f %f %f\n", trans_x, trans_y, trans_z);
-                break;
-            case 55:
-                trans_x += 0.1f;
-                printf("%f %f %f\n", trans_x, trans_y, trans_z);
-                break;
-            case 56:
-                trans_y += 0.1f;
-                printf("%f %f %f\n", trans_x, trans_y, trans_z);
-                break;
-            case 57:
-                trans_z += 0.1f;
-                printf("%f %f %f\n", trans_x, trans_y, trans_z);
-                break;
-            case 49:
-                trans_x -= 0.1f;
-                printf("%f %f %f\n", trans_x, trans_y, trans_z);
-                break;
-            case 50:
-                trans_y -= 0.1f;
-                printf("%f %f %f\n", trans_x, trans_y, trans_z);
-                break;
-            case 51:
-                trans_z -= 0.1f;
-                printf("%f %f %f\n", trans_x, trans_y, trans_z);
-                break;
-            case 47:
-                orto1 -= 0.1f;
-                printf("%f/%f\n", orto1, orto2);
-                break;
-            case 42:
-                orto1 += 0.1f;
-                printf("%f/%f\n", orto1, orto2);
-                break;
-            case 45:
-                orto2 -= 0.1f;
-                printf("%f/%f\n", orto1, orto2);
-                break;
-            case 43:
-                orto2 += 0.1f;
-                printf("%f/%f\n", orto1, orto2);
-                break;
+        case 114:
+            verts_len = 0;
+            //loadVert(posData->g_x, posData->g_y, BR);
 
 
-            case 105:
-                orto3 -= 0.1f;
-                printf("%f/%f\n", orto3, orto4);
-                break;
-            case 107:
-                orto3 += 0.1f;
-                printf("%f/%f\n", orto3, orto4);
-                break;
-            case 111:
-                orto4 -= 0.1f;
-                printf("%f/%f\n", orto3, orto4);
-                break;
-            case 108:
-                orto4 += 0.1f;
-                printf("%f/%f\n", orto3, orto4);
-                break;
-             */
+            break;
+        case 53:
+            if (gui_mode == _2D_) {
+                posData->o_x = 0.0f;
+                posData->o_y = 0.0f;
+            }
+            break;
+        case 56:
+            if (gui_mode == _2D_) {
+                posData->o_y += 0.1f;
+            }
+            break;
+        case 50:
+            if (gui_mode == _2D_) {
+                posData->o_y -= 0.1f;
+            }
+            break;
+        case 52:
+            if (gui_mode == _2D_) {
+                posData->o_x -= 0.1f;
+            }
+            break;
+        case 54:
+            if (gui_mode == _2D_) {
+                posData->o_x += 0.1f;
+            }
+            break;
+        case 55:
+            if (gui_mode == _2D_) {
+                posData->o_x -= 0.1f;
+                posData->o_y += 0.1f;
+            }
+            break;
+        case 57:
+            if (gui_mode == _2D_) {
+                posData->o_x += 0.1f;
+                posData->o_y += 0.1f;
+            }
+            break;
+        case 51:
+            if (gui_mode == _2D_) {
+                posData->o_x += 0.1f;
+                posData->o_y -= 0.1f;
+            }
+            break;
+        case 49:
+            if (gui_mode == _2D_) {
+                posData->o_x -= 0.1f;
+                posData->o_y -= 0.1f;
+            }
+            break;
         case 119:
             posData->v += 30.0f;
-            PRINTF("v: %f\n", posData->v)
-                    ;
+            PRINTF("v: %f\n", posData->v);
             break;
         case 115:
             posData->v -= 30.0f;
-            PRINTF("v: %f\n", posData->v)
-                    ;
+            PRINTF("v: %f\n", posData->v);
             break;
         case 97:
             posData->angle -= 3.0f;
             if (posData->angle < 0.0f) {
                 posData->angle += 360.0f;
             }
-            PRINTF("angle: %f\n", posData->angle)
-                    ;
+            PRINTF("angle: %f\n", posData->angle);
             break;
         case 100:
             posData->angle += 3.0f;
             if (posData->angle >= 360.0f) {
                 posData->angle -= 360.0f;
             }
-            PRINTF("angle: %f\n", posData->angle)
-                    ;
+            PRINTF("angle: %f\n", posData->angle);
             break;
         case 45:
             if (ORTHO < 10.0) {
@@ -983,52 +1052,33 @@ void Key(ESContext *esContext, unsigned char a, int b, int c) {
             }
             break;
         case 43:
-            if (ORTHO > 2.0) {
+            if (ORTHO > 1.0) {
                 ORTHO -= 1.0f;
                 esMatrixLoadIdentity(&perspective);
                 esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
             }
             break;
+        case 104:
+            if (gui_mode == _2D_) {
+                T_Y = V_Z_DEFAULT;
+                gui_mode = _3D_;
+                posData->o_y = 0.3f;
+            } else if (gui_mode == _3D_) {
+
+                T_Y = 0.0f;
+                gui_mode = _2D_;
+                posData->o_x = 0.0f;
+                posData->o_y = 0.0f;
+            }
+            break;
     }
 
 }
-//static bool intrack = false;
-//static time_t timeout = 5; /* seconds */
-//static double minmove = 0; /* meters */
 
-/*
-void conditionally_log_fix(struct gps_data_t gpsdata) {
-    double int_time, old_int_time = 0.0f;
-    double old_lat = 0.0f, old_lon = 0.0f;
-    bool first = true;
-
-    int_time = gpsdata.fix.time;
-    if ((int_time == old_int_time) || gpsdata.fix.mode < MODE_2D)
-        return;
-
-    if (minmove > 0 && !first && earth_distance(gpsdata.fix.latitude, gpsdata.fix.longitude, old_lat, old_lon) < minmove)
-        return;
-
-    if (fabs(int_time - old_int_time) > timeout && !first) {
-        intrack = false;
-    }
-
-    if (!intrack) {
-        intrack = true;
-        if (first)
-            first = false;
-    }
-
-    old_int_time = int_time;
-    if (minmove > 0) {
-        old_lat = gpsdata.fix.latitude;
-        old_lon = gpsdata.fix.longitude;
-    }
-    PRINTF("lat=\"%f\" lon=\"%f\"\n", gpsdata.fix.latitude, gpsdata.fix.longitude);
-}*/
 int linaere_suche_TVE(T_V_E *M, int count, int id) {
     for (int a = 0; a < count; a++) {
         if (M[a].id == id) {
+
             return a;
         }
     }
@@ -1038,19 +1088,35 @@ int linaere_suche_TVE(T_V_E *M, int count, int id) {
 unsigned short linaere_suche_farbe(T_V_E *M, unsigned short count, float r, float g, float b) {
     for (unsigned short a = 0; a < count; a++) {
         if ((M[a].r == r) &&(M[a].g == g)&&(M[a].b == b)) {
+
             return a;
         }
     }
     return __SHRT_MAX__;
 }
 
+unsigned short linaere_suche_VERTS_F(float *M1, unsigned short count, float *M2) {
+    for (unsigned short n = 0; n < count; n++) {
+        if (memcmp(&M1[5 * n], M2, 20) == 0) {
+
+            return n;
+        }
+
+        /*if ((M[5 * n] == x1) && (M[5 * n + 1] == y1) && (M[5 * n + 3] == x2)&& (M[5 * n + 4] == y2)) {
+            return n;
+        }*/
+    }
+    return USHRT_MAX;
+}
+
 unsigned short linaere_suche_VERTS(float *M, unsigned short count, float x, float y) {
     for (unsigned short n = 0; n < count; n++) {
         if ((M[3 * n] == x) && (M[3 * n + 1] == y)) {
+
             return n;
         }
     }
-    return __SHRT_MAX__;
+    return USHRT_MAX;
 }
 
 unsigned short binaere_suche(T_V_E *M, unsigned short count, int id) {
@@ -1070,6 +1136,7 @@ unsigned short binaere_suche(T_V_E *M, unsigned short count, int id) {
             if (M[mitte].id > id) {
                 rechts = mitte - 1;
             } else {
+
                 links = mitte + 1;
             }
         }
@@ -1099,6 +1166,7 @@ int cmpfunc_farbe(const void * a, const void * b) {
     if (b_a < b_b)
         return -1;
     else if (b_a > b_b)
+
         return 1;
 
     return 0;
@@ -1108,223 +1176,37 @@ int cmpfunc_id(const void * a, const void * b) {
     return (((T_V_E*) a)->id - ((T_V_E*) b)->id);
 }
 
-void insertVert_index(T_V_E *src, unsigned short len, unsigned short *index, unsigned short *index_len, T_V_E *fa, unsigned short *farbe_len) {
-    unsigned short gef2 = 0;
-    float r = -1.0, g = -1.0, b = -1.0;
-
-    for (unsigned short a = 0; a < len; a++) {
-        if ((src[a].r != r) || (src[a].g != g) || (src[a].b != b)) {
-            fa[*farbe_len].r = src[a].r;
-            fa[*farbe_len].g = src[a].g;
-            fa[*farbe_len].b = src[a].b;
-            r = src[a].r;
-            g = src[a].g;
-            b = src[a].b;
-
-            fa[*farbe_len].index = *index_len;
-            fa[*farbe_len].len = src[a].len;
-
-            (*farbe_len)++;
-        } else {
-            fa[*farbe_len - 1].len += src[a].len;
-        }
-
-        for (unsigned short n = 0; n < src[a].len; n++) {
-            gef2 = linaere_suche_VERTS(verts, verts_len, tmp_verts[ 3 * (src[a].index + n)], tmp_verts[ 3 * (src[a].index + n) + 1]);
-            index[*index_len] = gef2;
-            (*index_len)++;
-        }
-    }
-}
-
-void insertT_V_E(T_V_E *dst, unsigned short *dst_len, T_V_E *src, unsigned short len) {
-    unsigned short gef = 0;
-    for (unsigned short n = 0; n < tmp_vert_len; n++) {
-        gef = linaere_suche_VERTS(verts, verts_len, tmp_verts[ 3 * n], tmp_verts[ 3 * n + 1]);
-
-        if (gef == __SHRT_MAX__) {
-
-            memcpy(&verts[3 * verts_len], &tmp_verts[3 * n], 3 * sizeof (GLfloat));
-            verts_len++;
-        }
-    }
-
-    memcpy(dst, src, len * sizeof (T_V_E));
-    *dst_len = len;
-}
-
-void insertT_V_E_old(T_V_E *dst, unsigned short *dst_len, T_V_E *src, unsigned short len) {
-    unsigned short gef = 0, gef2 = 0;
-    for (int a = 0; a < len; a++) {
-        gef = binaere_suche(dst, *dst_len, src[a].id);
-
-        if (gef == __SHRT_MAX__) {
-            for (unsigned short n = 0; n < src[a].len; n++) {
-                gef2 = linaere_suche_VERTS(verts, verts_len, tmp_verts[ 3 * (src[a].index + n)], tmp_verts[ 3 * (src[a].index + n) + 1]);
-
-                if (gef2 == __SHRT_MAX__) {
-
-                    memcpy(&verts[3 * verts_len], &tmp_verts[3 * (src[a].index + n)], 3 * sizeof (GLfloat));
-                    verts_len++;
-                }
-            }
-            //memcpy(&verts[3 * verts_len], &tmp_verts[3 * src[a].index], 3 * src[a].len * sizeof (GLfloat));
-            //src[a].index = verts_len;
-            //verts_len += src[a].len;
-            memcpy(&dst[(*dst_len)++], &src[a], sizeof (T_V_E));
-        }
-    }
-}
-
-void loadVert(double lon, double lat, double d) {
-
-    struct timespec spec0, spec1, spec2;
-    unsigned int ms;
-
-    char where[110];
-    char sql_vertex[200];
-    char sql_polygon[200];
-    char sql_reis[200];
-    char sql_verts[200];
-    char sql[500];
-
-    setlocale(LC_NUMERIC, "en_US.UTF-8");
-
-    snprintf(where, 110, " v_lon between %f and  %f and v_lat between %f and %f", lon - d, lon + d, lat - d, lat + d);
-    snprintf(sql_vertex, 200, "(SELECT DISTINCT v_l_id FROM vertex WHERE %s)", where);
-    snprintf(sql_polygon, 200, "(SELECT DISTINCT v_l_id FROM polygon WHERE %s)", where);
-    snprintf(sql_reis, 200, "(SELECT DISTINCT v_l_id FROM residential WHERE %s)", where);
-
-    snprintf(sql_verts, 200, "(SELECT DISTINCT v_l_id FROM v_verts WHERE %s)", where);
-
-    char *zErrMsg = 0;
-
-    tmp_vert_len = 0;
-    tmp_yama_len = 0;
-    tmp_werder_len = 0;
-    tmp_reis_len = 0;
-    sqc_tmp = 0;
-
-    //snprintf(sql, 1000, "SELECT v_lon,v_lat FROM polygon t JOIN %s g ON t.v_l_id = g.v_l_id UNION SELECT v_lon,v_lat FROM vertex t JOIN %s  g ON t.v_l_id = g.v_l_id UNION SELECT v_lon,v_lat FROM residential t JOIN %s g ON t.v_l_id = g.v_l_id", sql_polygon, sql_vertex, sql_reis);
-
-    clock_gettime(CLOCK_MONOTONIC, &spec0);
-    clock_gettime(CLOCK_MONOTONIC, &spec1);
-
-    // Flächen laden
-    snprintf(sql, 500, "SELECT v_lon,v_lat FROM polygon t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", sql_polygon);
-    sqlite3_exec(db, sql, sqc_vertex, 0, &zErrMsg);
-    //printf("%s\n", sql);
-    TM(spec1, spec2, 'Flächen laden')
-
-    // Wege laden
-    snprintf(sql, 500, "SELECT v_lon,v_lat FROM vertex t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", sql_vertex);
-    sqlite3_exec(db, sql, sqc_vertex, 0, &zErrMsg);
-    //printf("%s\n", sql);
-    TM(spec2, spec1, 'Wege laden')
-
-    // Residental laden
-    snprintf(sql, 500, "SELECT v_lon,v_lat FROM residential t JOIN %s g ON t.v_l_id=g.v_l_id ORDER BY t.v_l_id ASC,t.v_seq ASC", sql_reis);
-    sqlite3_exec(db, sql, sqc_vertex, 0, &zErrMsg);
-    //printf("%s\n", sql);
-    TM(spec1, spec2, 'Residental laden')
-
-    // Anzahl der der Flächenfarben
-    //snprintf(sql, 500, "SELECT count(*) FROM (SELECT distinct R,G,B FROM eigenschaften JOIN %s ON l_id=v_l_id JOIN config_farbe ON CF_ID=L_TYP)", sql_polygon);
-    //sqlite3_exec(db, sql, sqc_farbe, &farbe_len, &zErrMsg);
-
-    // Eigenschaften Fläche
-    snprintf(sql, 500, "SELECT L_ID,L_COUNT,R,G,B,OSM_ID FROM eigenschaften JOIN %s ON l_id=v_l_id JOIN config_farbe ON CF_ID=L_TYP ORDER BY l_id ASC", sql_polygon);
-    sqlite3_exec(db, sql, sqc_yama, &tmp_reis_len, &zErrMsg);
-    tmp_yama_len = tmp_reis_len;
-    //printf("%s\n",sql);
-    TM(spec2, spec1, 'Eigenschaften Fläche')
-
-    // Eigenschaften Weg
-    snprintf(sql, 500, "SELECT L_ID,L_COUNT,R,G,B,OSM_ID FROM eigenschaften JOIN %s ON l_id=v_l_id JOIN config_farbe ON CF_ID=L_TYP ORDER BY l_id ASC", sql_vertex);
-    sqlite3_exec(db, sql, sqc_yama, &tmp_reis_len, &zErrMsg);
-    tmp_werder_len = tmp_reis_len;
-    //printf("%s\n", sql);
-    TM(spec1, spec2, 'Eigenschaften Weg')
-
-    // Eigenschaften Residental
-    snprintf(sql, 500, "SELECT L_ID,L_COUNT,R,G,B,OSM_ID FROM eigenschaften JOIN %s ON l_id=v_l_id JOIN config_farbe ON CF_ID=L_TYP ORDER BY l_id ASC", sql_reis);
-    sqlite3_exec(db, sql, sqc_yama, &tmp_reis_len, &zErrMsg);
-    //printf("%s\n", sql);
-    TM(spec2, spec1, 'Eigenschaften Residental')
-
-    //qsort(yama, yama_len, sizeof (T_V_E), cmpfunc_id);
-    //qsort(werder, werder_len, sizeof (T_V_E), cmpfunc_id);
-    //qsort(reis, reis_len, sizeof (T_V_E), cmpfunc_id);
-    //TM(spec1, spec2, 'qsort')
-
-    // neue Flächen hinzufügen
-    insertT_V_E(yama, &yama_len, &tmp_yama[0], tmp_yama_len);
-    insertT_V_E(werder, &werder_len, &tmp_yama[tmp_yama_len], tmp_werder_len - tmp_yama_len);
-    insertT_V_E(reis, &reis_len, &tmp_yama[tmp_werder_len], tmp_reis_len - tmp_werder_len);
-    TM(spec2, spec1, 'insertT_V_E')
-
-    qsort(yama, yama_len, sizeof (T_V_E), cmpfunc_farbe);
-    qsort(reis, reis_len, sizeof (T_V_E), cmpfunc_farbe);
-    qsort(werder, werder_len, sizeof (T_V_E), cmpfunc_farbe);
-    TM(spec1, spec2, 'qsort')
-
-
-    ///////////////////
-    T_V_E tmp_farbe[20];
-    static unsigned short tmp_yama_index[V_LEN];
-    unsigned short tmp_farbe_werder_len = 0, tmp_farbe_reis_len = 0, tmp_farbe_yama_len = 0;
-    unsigned short tmp_yama_index_len = 0;
-
-    insertVert_index(reis, reis_len, tmp_yama_index, &tmp_yama_index_len, tmp_farbe, &tmp_farbe_werder_len);
-    tmp_farbe_reis_len = tmp_farbe_yama_len;
-    insertVert_index(yama, yama_len, tmp_yama_index, &tmp_yama_index_len, tmp_farbe, &tmp_farbe_werder_len);
-    tmp_farbe_yama_len = tmp_farbe_werder_len;
-    insertVert_index(werder, werder_len, tmp_yama_index, &tmp_yama_index_len, tmp_farbe, &tmp_farbe_werder_len);
-
-
-    pthread_mutex_lock(&m_deto);
-    farbe_werder_len = tmp_farbe_werder_len;
-    farbe_reis_len = tmp_farbe_reis_len;
-    farbe_yama_len = tmp_farbe_yama_len;
-    yama_index_len = tmp_yama_index_len;
-    memcpy(farbe, tmp_farbe, 20 * sizeof (T_V_E));
-    memcpy(yama_index, tmp_yama_index, tmp_yama_index_len * sizeof (unsigned short));
-    new_tex = 1;
-    pthread_mutex_unlock(&m_deto);
-
-
-
-
-    TM(spec2, spec1, 'insertVert_index')
-
-    printf("\rloadVert   %f, %f   %.1f\n", lon, lat, BR);
-    printf("\rloadVert   verts: %i  index: %i  yama: %i  werder: %i resi: %i\n", verts_len, yama_index_len, yama_len, werder_len, reis_len);
-    printf("\r###############################################################\n");
-    /*
-     vbox: alt: ca. 800ms
-     */
-    TM(spec0, spec2, 'gesamt')
-}
-
-void setPOS(ESContext * esContext) {
-
+void initPOS(ESContext * esContext) {
     POS_T *posData = esContext->posData;
 
-    PRINTF("\rsetPOS lon/lat: %f %f\n", posData->gps_longitude, posData->gps_latitude);
+    pos = fopen(HOME "sit2d_pos", "rb+");
+    if (pos == NULL)
+        pos = fopen(HOME "sit2d_pos", "wb");
 
-    posData->g_x = (posData->gps_longitude + 180.0) / 360.0 * pow2Z;
-    posData->g_y = (1.0 - log(tan(posData->gps_latitude * rad2deg) + 1.0 / cos(posData->gps_latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
-    PRINTF("\rsetPOS g: %f %f\n", posData->g_x, posData->g_y);
+    if (fread(&posData->g_x, sizeof (double), 1, pos) == 1) {
+        fread(&posData->g_y, sizeof (double), 1, pos);
+        fread(&posData->gps_altitude, sizeof (double), 1, pos);
+        fread(&posData->angle, sizeof (float), 1, pos);
+    } else {
+        PRINTF("\rinitPOS: sit2d_pos leer.\n");
+        posData->gps_latitude = 52.1317029;
+        posData->gps_longitude = 11.6530974;
+        posData->gps_altitude = 0.0;
+        posData->angle = 0.0f;
 
-    posData->t_x = (int) floor(posData->g_x);
-    posData->t_y = (int) floor(posData->g_y);
-    PRINTF("\rsetPOS t: %i %i\n", posData->t_x, posData->t_y);
+        posData->g_x = (posData->gps_longitude + 180.0) / 360.0 * pow2Z;
+        posData->g_y = (1.0 - log(tan(posData->gps_latitude * rad2deg) + 1.0 / cos(posData->gps_latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
 
-    posData->m_x = (int) floor(fmod(posData->g_x, 1.0f)*1000000.0);
-    posData->m_y = (int) floor(fmod(posData->g_y, 1.0f)*1000000.0);
-    PRINTF("\rsetPOS m: %i %i\n", posData->m_x, posData->m_y);
+        fwrite(&posData->g_x, sizeof (double), 1, pos);
+        fwrite(&posData->g_y, sizeof (double), 1, pos);
+        fwrite(&posData->gps_latitude, sizeof (double), 1, pos);
+        fwrite(&posData->angle, sizeof (float), 1, pos);
+        fseek(pos, 0, SEEK_SET);
+    }
 
     posData->osmS = 40075017 * cos(posData->gps_latitude * M_PI / 180.0) / pow(2.0, 18.0 + 8.0) * IMAGE_SIZE;
+
+    PRINTF("\rinitPOS: g: %f %f a: %f\n", posData->g_x, posData->g_y, posData->angle);
 }
 
 void * foss(void *esContext) {
@@ -1336,8 +1218,8 @@ void * foss(void *esContext) {
 
 #ifdef __RASPI__
     int gpio = -1;
-    gpio_lcd_init();
-    bl_write(BL_ON);
+    //gpio_lcd_init();
+    //bl_write(BL_ON);
 #endif
 
     while (1) {
@@ -1359,6 +1241,7 @@ void * foss(void *esContext) {
         } else
             bl_write(BL_ON);
          */
+#ifdef __LCD__
         gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
         for (int a = 0; a < 20; a++) {
             gpio_lcd_send_byte(line1_str[a], GPIO_HIGH);
@@ -1371,23 +1254,154 @@ void * foss(void *esContext) {
             gpio_lcd_send_byte(line2_str[a], GPIO_HIGH);
         }
 #endif
-        usleep(100000);
+#endif
+        printf("\rhum: %.2f  temp: %.2f\n", posData->i2c_hum, posData->i2c_temp);
+        usleep(1000000);
 
     }
     return NULL;
 }
 
-void * deta(void *esContext) {
-    POS_T *posData = ((ESContext*) esContext)->posData;
-    UserData *userData = ((ESContext*) esContext)->userData;
+/*unsigned short aufLinie(unsigned short *p, int count, double gx, double gy) {
+    //#define OIHANFOIA(Z) floorf(Z * 10)
+    double Ax, Ay, Bx, By, X2;
+    int i1 = 0, i2 = 0;
 
-    while (1) {
+    for (int n = 0; n < count; n += 2) {
+        i1 = p[n] * 5;
+        i2 = p[n + 1]*5;
 
-        loadVert(posData->g_x, posData->g_y, BR);
-        //new_tex = 1;
-        sleep(5);
-        //posData->v = 60.0f;
+        Ax = verts_F[ i1 ] + verts_F[i1 + 3];
+        Ay = verts_F[i1 + 1] + verts_F[i1 + 4];
+        Bx = verts_F[i2 ] + verts_F[i2 + 3];
+        By = verts_F[i2 + 1] + verts_F[i2 + 4];
+
+        X2 = Ax + ((gy - Ay) / (By - Ay)) * (Bx - Ax);
+
+        //printf("%f %f   %f %f\n", gx, X2, OIHANFOIA(gx), OIHANFOIA(X2));
+        if (fabs(gx - X2) < 0.1) {
+            //ret[asd++] = n;
+
+            return n;
+        }
     }
+
+    return USHRT_MAX;
+}*/
+
+void * ubongo(void *esContext) {
+    UserData *userData = ((ESContext*) esContext)->userData;
+    POS_T *posData = ((ESContext*) esContext)->posData;
+    unsigned short ret;
+    sleep(3);
+    while (1) {
+        int asd = 0;
+        for (unsigned short a = farbe_yama_len; a < farbe_werder_len; a++) {
+            asd += farbe_yama[a].len;
+        }
+        //printf("%i %i %i %f %f\n", farbe_yama_len, farbe[farbe_yama_len].index, asd, posData->g_x, posData->g_y);
+        //ret = aufLinie(&index_yama[farbe[farbe_yama_len].index], asd, posData->g_x, posData->g_y);
+        //ret=166;
+        printf("\raufLinie: %i\n", ret);
+        if (ret != USHRT_MAX) {
+            markierung.r = 0.0f;
+            markierung.g = 0.0f;
+            markierung.b = 1.0f;
+
+            markierung.gl_mode = tmp_gl_mode[3];
+            markierung.glLineWidth = 5.0f;
+            markierung.typ = 3;
+
+            markierung.index = farbe_yama[farbe_yama_len].index + ret;
+
+            markierung.len = 2;
+        } else {
+
+            memset(&markierung, 0, sizeof (T_V_E));
+        }
+        sleep(1);
+    }
+}
+
+#define SHIFT 4
+#define DB_LVL2 "sit2d_6_lvl2.db"
+#define DB_LVL3 "sit2d_6_lvl3.db"
+
+#define SQL_ABFRAGE "SELECT 2 as l_lvl,l_cf_r,l_cf_g,l_cf_b,t.L_ID,V_LON,V_LAT\
+  FROM (SELECT DISTINCT L_ID\
+             FROM vertex\
+            WHERE V_T_LON BETWEEN %i AND %i AND\
+                  V_T_LAT BETWEEN %i AND %i) t\
+       JOIN vertex g ON t.L_ID = g.L_ID\
+       JOIN eigenschaften ON g.L_Id = eigenschaften.L_ID\
+       ORDER BY l_lvl,l_cf_r,l_cf_g,l_cf_b,t.L_ID,I_SEQ"
+
+void * deta_lvl2(void *esContext) {
+    POS_T *posData = ((ESContext*) esContext)->posData;
+    struct timespec spec0, spec1;
+
+    int lon1 = (int) floor(posData->g_x);
+    int lat1 = (int) floor(posData->g_y);
+
+    int d1 = (int) floor(BR);
+
+    char sql[700];
+
+    char *zErrMsg = 0;
+
+    verts_yama_len = 0;
+    tmp_index_yama_len = 0;
+    tmp_farbe_yama_len = 0;
+
+    clock_gettime(CLOCK_MONOTONIC, &spec0);
+
+    snprintf(sql, 700, SQL_ABFRAGE, (lon1 - d1) >> SHIFT, (lon1 + d1) >> SHIFT, (lat1 - d1) >> SHIFT, (lat1 + d1) >> SHIFT);
+    //printf("\r%s\n", sql);
+    sqlite3_exec(db_2, sql, sqc_vertex_lvl2, 0, &zErrMsg);
+
+    pthread_mutex_lock(&mutex_deto_lvl2);
+    farbe_yama_len = tmp_farbe_yama_len;
+    index_yama_len = tmp_index_yama_len;
+    memcpy(farbe_yama, tmp_farbe_yama, tmp_farbe_yama_len * sizeof (T_V_E));
+    memcpy(index_yama, tmp_index_yama, tmp_index_yama_len * sizeof (unsigned short));
+    new_tex_lvl2 = 1;
+    pthread_mutex_unlock(&mutex_deto_lvl2);
+
+    TM(spec0, spec1)
+}
+
+void * deta_lvl3(void *esContext) {
+    POS_T *posData = ((ESContext*) esContext)->posData;
+    struct timespec spec0, spec1;
+
+    int lon1 = (int) floor(posData->g_x);
+    int lat1 = (int) floor(posData->g_y);
+
+    int d1 = (int) floor(BR);
+
+    char sql[700];
+
+    char *zErrMsg = 0;
+
+    verts_werder_len = 0;
+    tmp_index_werder_len = 0;
+    tmp_farbe_werder_len = 0;
+
+    clock_gettime(CLOCK_MONOTONIC, &spec0);
+
+    snprintf(sql, 700, SQL_ABFRAGE, (lon1 - d1) >> SHIFT, (lon1 + d1) >> SHIFT, (lat1 - d1) >> SHIFT, (lat1 + d1) >> SHIFT);
+    //printf("\r%s\n", sql);
+    sqlite3_exec(db_3, sql, sqc_vertex_lvl3, 0, &zErrMsg);
+
+    pthread_mutex_lock(&mutex_deto_lvl3);
+    farbe_werder_len = tmp_farbe_werder_len;
+    index_werder_len = tmp_index_werder_len;
+    memcpy(farbe_werder, tmp_farbe_werder, tmp_farbe_werder_len * sizeof (T_V_E));
+    memcpy(index_werder, tmp_index_werder, tmp_index_werder_len * sizeof (unsigned short));
+    new_tex_lvl3 = 1;
+    pthread_mutex_unlock(&mutex_deto_lvl3);
+
+    TM(spec0, spec1, '')
 }
 
 void * jolla(void *esContext) {
@@ -1476,15 +1490,26 @@ double getDegrees(double lat1, double lon1, double lat2, double lon2) {
     return atan2(sin(lam2 - lam1) * cos(phi2), cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(lam2 - lam1)) * 180 / M_PI;
 }
 
+int delay1(unsigned long mikros) {
+    struct timespec ts;
+    int err;
+
+    ts.tv_sec = mikros / 1000000L;
+    ts.tv_nsec = (mikros % 1000000L) * 1000L;
+    err = nanosleep(&ts, (struct timespec *) NULL);
+    return (err);
+}
+
 void * pinto(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
 
+    long int elapsed;
+
     float speed = 0.0f, old_speed = 0.0f, deltatime = 0.0f;
     float deg, old_deg;
-    struct timeval t1, t2;
+    struct timeval t1, t2, t_start;
     int lk = 0, status;
     double g_x, g_y, old_lat, old_lon, old_g_x, old_g_y, dist;
-
 
 #ifdef __OBD__
     int obd_serial = -1;
@@ -1497,25 +1522,24 @@ void * pinto(void *esContext) {
     OBDConvFunc conv = obdcmds_mode1[obd_pid].conv;
 #endif
 
-#ifdef __GPS__
     int gpsd_init = -1;
     //struct GPS_T gpsData;
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
-#endif
+
+    int i2c_init = -1;
+    enum e_i2c_status i2c_status;
 
 #ifdef __I2C__
-    int i2c_init = -1;
     short i2c_x, i2c_y, i2c_z;
-    enum e_i2c_status i2c_status;
 #endif
-
-    gettimeofday(&t1, NULL);
+#ifdef __SENSOR_HUM__
+    float i2c_hum, i2c_temp;
+#endif
+    gettimeofday(&t_start, NULL);
+    t1 = t_start;
 
     while (1) {
-        usleep(500000);
-
-        //posData->v = 30.0f;
-
+        delay1(500000L);
         old_lat = posData->gps_latitude;
         old_lon = posData->gps_longitude;
 
@@ -1527,6 +1551,8 @@ void * pinto(void *esContext) {
 
         gettimeofday(&t2, NULL);
         deltatime = (float) (t2.tv_sec - t1.tv_sec + (t2.tv_usec - t1.tv_usec) * 1e-6) * 1000;
+
+        elapsed = (t2.tv_sec - t_start.tv_sec)*1000 + (t2.tv_usec - t_start.tv_usec) / 1000;
         t1 = t2;
 
 #ifdef __OBD__
@@ -1548,7 +1574,18 @@ void * pinto(void *esContext) {
             obd_serial = init_OBD(OBD_SERIAL);
         }
 #endif
+#ifdef __SENSOR_HUM__
+        if (i2c_init != -1) {
+            i2c_status = sensor_hum_read(&i2c_init, &i2c_hum, &i2c_temp);
+            lk = pthread_mutex_lock(&m_pinto);
+            posData->i2c_hum = i2c_hum;
+            posData->i2c_temp = i2c_temp;
+            pthread_mutex_unlock(&m_pinto);
 
+        } else {
+            i2c_status = sensor_hum_init(&i2c_init);
+        }
+#endif
 #ifdef __I2C__
         if (i2c_init != -1) {
             i2c_status = read_i2c(&i2c_init, &i2c_x, &i2c_y, &i2c_z);
@@ -1573,7 +1610,6 @@ void * pinto(void *esContext) {
                 g_x = (gpsData->longitude + 180.0) / 360.0 * pow2Z;
                 g_y = (1.0 - log(tan(gpsData->latitude * rad2deg) + 1.0 / cos(gpsData->latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
                 deg = gpsData->angle;
-
 #ifdef __OBD__
                 if (obd_serial == -1) {
                     dist = sqrt(pow(old_g_x - g_x, 2) + pow(old_g_y - g_y, 2)) * posData->osmS;
@@ -1602,38 +1638,53 @@ void * pinto(void *esContext) {
             } else {
                 gps_status[0] = 1.0f;
                 gps_status[2] = 0.0f;
+
             }
         } else {
-            gps_open(&gpsd_init, "/dev/ttyAMA02");
+            gps_open(&gpsd_init, "/dev/ttyAMA0");
         }
 #endif
-        //printf("%f\n",posData->g_y);
-        /*if (fabs(posData->g_y - posData->gpu_t_y) > 1.0f || fabs(posData->g_x - posData->gpu_t_x) > 1.0f) {
-            posData->gpu_t_x = (GLuint) floor(posData->g_x);
-            posData->gpu_t_y = (GLuint) floor(posData->g_y);
-            loadVert(posData->g_x, posData->g_y, BR);
-        }*/
-
-        fwrite(&posData->gps_latitude, sizeof (double), 1, gps_out);
-        fwrite(&posData->gps_longitude, sizeof (double), 1, gps_out);
-        fwrite(&dist, sizeof (double), 1, gps_out);
-        fwrite(&deltatime, sizeof (float), 1, gps_out);
-        fwrite(&speed, sizeof (float), 1, gps_out);
-        fwrite(&deg, sizeof (float), 1, gps_out);
-    }
 
 #ifdef __FIN__
-    if (fread(&gpsData->fix.latitude, sizeof (double), 1, gps_in) == 1) {
-        fread(&gpsData->fix.longitude, sizeof (double), 1, gps_in);
-        fread(&dist, sizeof (double), 1, gps_in);
-        fread(&deltatime, sizeof (float), 1, gps_in);
-        fread(&speed, sizeof (float), 1, gps_in);
-        fread(&deg, sizeof (float), 1, gps_in);
-    } else {
-        fclose(gps_in);
-    }
-    gpsData->status = 1;
+        //if (fread(&elapsed, sizeof (long), 1, gps_in) == 1) {
+        if (fread(&deltatime, sizeof (float), 1, gps_in) == 1) {
+            fread(&g_x, sizeof (double), 1, gps_in);
+            fread(&g_y, sizeof (double), 1, gps_in);
+            fread(&dist, sizeof (double), 1, gps_in);
+            fread(&speed, sizeof (float), 1, gps_in);
+            fread(&deg, sizeof (float), 1, gps_in);
+
+            lk = pthread_mutex_lock(&m_pinto);
+            //printf("asd: %f %f\n", posData->g_x, posData->g_y);
+            PRINTF("\rgps_out: %i %f %f %f %f %f %f \n", elapsed, deltatime, g_x, g_y, dist, speed, deg);
+
+            exit(1);
+            //posData->g_x = g_x;
+            //posData->g_y = g_y;
+            posData->angle = deg;
+            pthread_mutex_unlock(&m_pinto);
+        } else {
+            fclose(gps_in);
+        }
+        gpsData->status = 1;
+#else        
+        //fwrite(&elapsed, sizeof (long), 1, gps_out);
+        fwrite(&deltatime, sizeof (float), 1, gps_out);
+        fwrite(&posData->g_x, sizeof (double), 1, gps_out);
+        fwrite(&posData->g_y, sizeof (double), 1, gps_out);
+        fwrite(&dist, sizeof (double), 1, gps_out);
+        fwrite(&speed, sizeof (float), 1, gps_out);
+        fwrite(&deg, sizeof (float), 1, gps_out);
+        //PRINTF("\rgps_out: %i %f %f %f %f %f %f \n", elapsed, deltatime, posData->g_x, posData->g_y, dist, speed, deg);
+
+        fwrite(&posData->g_x, sizeof (double), 1, pos);
+        fwrite(&posData->g_y, sizeof (double), 1, pos);
+        fwrite(&posData->gps_latitude, sizeof (double), 1, pos);
+        fwrite(&posData->angle, sizeof (float), 1, pos);
+        fseek(pos, 0, SEEK_SET);
 #endif
+    }
+
 
     return NULL;
 }
@@ -1661,6 +1712,7 @@ void esMainLoop(ESContext * esContext) {
         clock_gettime(CLOCK_MONOTONIC, &spec1);
 #endif   
         Update(esContext, deltatime);
+        //Update2(esContext, deltatime);
         eglSwapBuffers(esContext->eglDisplay, esContext->eglSurface);
 
 #ifdef __TM__
@@ -1681,11 +1733,12 @@ void esMainLoop(ESContext * esContext) {
 
             PRINTF("\rFPS: %3.1f FRAMETIME: %i %4.1f %i  us: %u\n", frames / totaltime, ms_min, (float) ms_avg / frames, ms_max, us);
 
-            /*if ((frames / totaltime) > 30.0) {
+            if ((frames / totaltime) > 30.0) {
                 us += 1000;
             } else {
+
                 us = us > 1000 ? us - 1000 : us;
-            }*/
+            }
 
             totaltime -= 4.0f;
             frames = 0;
@@ -1696,63 +1749,97 @@ void esMainLoop(ESContext * esContext) {
 
         }
 #endif
-        //usleep(us);
+        usleep(us);
     }
 }
 
-static int sqc_vertex(void *NotUsed, int argc, char **argv, char **azColName) {
-    tmp_verts[3 * tmp_vert_len] = atof(argv[0]);
-    tmp_verts[3 * tmp_vert_len + 1] = atof(argv[1]);
-    tmp_verts[3 * tmp_vert_len + 2] = 0.0f;
+static int sqc_vertex_lvl2(void *a, int argc, char **argv, char **azColName) {
+    unsigned short gef = USHRT_MAX;
+    float tmp_f[] = {atof(argv[1]), atof(argv[2]), atof(argv[3])};
+    //unsigned char typ = atoi(argv[0]);
+    float tmp_glLineWidth = 5.0f;
+    float tmp_verts_F[5] = {0.0f};
 
-    tmp_vert_len++;
+    tmp_verts_F[3] = atof(argv[5] + 6);
+    tmp_verts_F[4] = atof(argv[6] + 5);
+    *(argv[5] + 6) = '\0';
+    *(argv[6] + 5) = '\0';
+    tmp_verts_F[0] = atof(argv[5]);
+    tmp_verts_F[1] = atof(argv[6]);
 
+    memcpy(&verts_F_yama[5 * verts_yama_len], tmp_verts_F, sizeof (tmp_verts_F));
+    gef = verts_yama_len;
+    verts_yama_len++;
+    tmp_index_yama[tmp_index_yama_len] = gef;
+
+    tmp_index_yama_len++;
+
+    if ((tmp_farbe_yama_len == 0) ||
+            (tmp_farbe_yama[tmp_farbe_yama_len - 1].r != tmp_f[0] || tmp_farbe_yama[tmp_farbe_yama_len - 1].g != tmp_f[1] || tmp_farbe_yama[tmp_farbe_yama_len - 1].b != tmp_f[2])) {
+        tmp_farbe_yama[tmp_farbe_yama_len].r = tmp_f[0];
+        tmp_farbe_yama[tmp_farbe_yama_len].g = tmp_f[1];
+        tmp_farbe_yama[tmp_farbe_yama_len].b = tmp_f[2];
+
+        //tmp_farbe_yama[tmp_farbe_yama_len].gl_mode = tmp_gl_mode[typ];
+        tmp_farbe_yama[tmp_farbe_yama_len].glLineWidth = tmp_glLineWidth;
+        //tmp_farbe_yama[tmp_farbe_yama_len].typ = typ;
+
+        tmp_farbe_yama[tmp_farbe_yama_len].index = tmp_index_yama_len - 1;
+
+        tmp_farbe_yama[tmp_farbe_yama_len].len = 1;
+
+        tmp_farbe_yama_len++;
+    } else {
+        tmp_farbe_yama[tmp_farbe_yama_len - 1].len++;
+    }
+
+    //PRINTF("asd\n");
     return 0;
 }
 
-static int sqc_farbe(void *a, int argc, char **argv, char **azColName) {
-    *((unsigned short*) a) = atoi(argv[0]);
+static int sqc_vertex_lvl3(void *a, int argc, char **argv, char **azColName) {
+    unsigned short gef = USHRT_MAX;
+    float tmp_f[] = {atof(argv[1]), atof(argv[2]), atof(argv[3])};
+    //unsigned char typ = atoi(argv[0]);
+    float tmp_glLineWidth = 5.0f;
+    float tmp_verts_F[5] = {0.0f};
 
+    tmp_verts_F[3] = atof(argv[5] + 6);
+    tmp_verts_F[4] = atof(argv[6] + 5);
+    *(argv[5] + 6) = '\0';
+    *(argv[6] + 5) = '\0';
+    tmp_verts_F[0] = atof(argv[5]);
+    tmp_verts_F[1] = atof(argv[6]);
+
+    memcpy(&verts_F_werder[5 * verts_werder_len], tmp_verts_F, sizeof (tmp_verts_F));
+    gef = verts_werder_len;
+    verts_werder_len++;
+    tmp_index_werder[tmp_index_werder_len] = gef;
+
+    tmp_index_werder_len++;
+
+    if ((tmp_farbe_werder_len == 0) ||
+            (tmp_farbe_werder[tmp_farbe_werder_len - 1].r != tmp_f[0] || tmp_farbe_werder[tmp_farbe_werder_len - 1].g != tmp_f[1] || tmp_farbe_werder[tmp_farbe_werder_len - 1].b != tmp_f[2])) {
+        tmp_farbe_werder[tmp_farbe_werder_len].r = tmp_f[0];
+        tmp_farbe_werder[tmp_farbe_werder_len].g = tmp_f[1];
+        tmp_farbe_werder[tmp_farbe_werder_len].b = tmp_f[2];
+
+        //tmp_farbe_werder[tmp_farbe_werder_len].gl_mode = tmp_gl_mode[typ];
+        tmp_farbe_werder[tmp_farbe_werder_len].glLineWidth = tmp_glLineWidth;
+        //tmp_farbe_werder[tmp_farbe_werder_len].typ = typ;
+
+        tmp_farbe_werder[tmp_farbe_werder_len].index = tmp_index_werder_len - 1;
+
+        tmp_farbe_werder[tmp_farbe_werder_len].len = 1;
+
+        tmp_farbe_werder_len++;
+    } else {
+        tmp_farbe_werder[tmp_farbe_werder_len - 1].len++;
+    }
+
+    //PRINTF("asd\n");
     return 0;
 }
-
-static int sqc_yama(void *a, int argc, char **argv, char **azColName) {
-    tmp_yama[*((int*) a)].id = atoi(argv[0]);
-    tmp_yama[*((int*) a)].len = atoi(argv[1]);
-    tmp_yama[*((int*) a)].r = atof(argv[2]);
-    tmp_yama[*((int*) a)].g = atof(argv[3]);
-    tmp_yama[*((int*) a)].b = atof(argv[4]);
-    tmp_yama[*((int*) a)].osm_id = atoi(argv[5]);
-
-    tmp_yama[*((int*) a)].index = sqc_tmp;
-    sqc_tmp += tmp_yama[*((int*) a)].len;
-
-    (*((int*) a))++;
-
-    return 0;
-}
-
-static int sqc_yama2(void *a, int argc, char **argv, char **azColName) {
-    tmp_yama[*((int*) a)].id = atoi(argv[0]);
-    tmp_yama[*((int*) a)].len = atoi(argv[1]);
-    tmp_yama[*((int*) a)].r = atof(argv[2]);
-    tmp_yama[*((int*) a)].g = atof(argv[3]);
-    tmp_yama[*((int*) a)].b = atof(argv[4]);
-
-    tmp_yama[*((int*) a)].index = sqc_tmp;
-    sqc_tmp += tmp_yama[*((int*) a)].len;
-
-    (*((int*) a))++;
-
-    return 0;
-}
-
-static int sqc_count(void *out_var, int argc, char **argv, char **azColName) {
-    *((int*) out_var) = atoi(argv[0]);
-
-    return 0;
-}
-ESContext esContext;
 
 void ShutDown(int signum) {
     //void sigfunc(int sig) 
@@ -1767,11 +1854,11 @@ void ShutDown(int signum) {
     fclose(gps_in);
 #endif
 
-    sqlite3_close(db);
+    sqlite3_close(db_2);
 
 #ifdef __RASPI__
     //gpio_unexport(LCD_BUS, 6);
-    bl_write(BL_OFF);
+    //bl_write(BL_OFF);
 #endif
 
     glDeleteProgram(userData->programGUI);
@@ -1785,13 +1872,18 @@ void ShutDown(int signum) {
 }
 
 int main(int argc, char *argv[]) {
+    setlocale(LC_NUMERIC, "en_US.UTF-8");
+
     UserData userData;
     POS_T posData;
     GPS_T gpsData;
+    memset(&posData, 0, sizeof (POS_T));
+    memset(&gpsData, 0, sizeof (GPS_T));
 
-    pthread_t thread_id1, thread_id2, thread_id3, thread_id4;
+    pthread_t thread_id1, thread_id2, thread_id3, thread_id4, thread_id5;
     pthread_mutex_init(&m_pinto, NULL);
-    pthread_mutex_init(&m_deto, NULL);
+    pthread_mutex_init(&mutex_deto_lvl2, NULL);
+    pthread_mutex_init(&mutex_deto_lvl3, NULL);
 
     signal(SIGTERM, ShutDown);
     //signal(SIGINT, ShutDown);
@@ -1800,52 +1892,31 @@ int main(int argc, char *argv[]) {
     userData.width = 800;
     userData.height = 480;
 
-    userData.r_height = RSIZE;
-    userData.r_width = RSIZE;
-
 #ifdef __RASPI__
-    const char *homedir = "/home/pi";
-    bl_write(BL_ON);
-#else
-    const char *homedir = getenv("HOME");
+    //bl_write(BL_ON);
 #endif
 
-    char filename[50];
-    strncpy(filename, homedir, 50);
-    sout = fopen(strncat(filename, "/sit2d_debug.txt", 16), "w");
-    strncpy(filename, homedir, 50);
-    gps_out = fopen(strncat(filename, "/sit2d.gps", 10), "w");
+    char filename[100], buffer[80];
+
+    sout = fopen(HOME "/sit2d_debug.txt", "w");
+    assert(sout != NULL);
+
+    strncpy(filename, HOME, 100);
+
+    time_t rawtime;
+    struct tm *info;
+    time(&rawtime);
+    info = localtime(&rawtime);
+
+    strftime(buffer, 80, "%Y%m%d%H%M_sit2d.gps", info);
+    gps_out = fopen(strncat(filename, buffer, 80), "wb");
+    assert(gps_out != NULL);
 
 #ifdef __FIN__
-    strcpy(filename, homedir);
-    gps_in = fopen(strcat(filename, "/asd.gps"), "r");
+    gps_in = fopen(HOME "sit2d.gps", "rb");
     assert(gps_in != NULL);
     PRINTF("%s geladen.\n", filename);
 #endif
-
-    userData.element4Pixel = 1;
-    userData.imgrow_sz = IMAGE_SIZE * userData.element4Pixel;
-    userData.image_sz = IMAGE_SIZE * userData.imgrow_sz;
-    userData.tiles = userData.r_height * userData.r_width;
-
-#ifdef __NEW_MESH__
-    stride = userData.imgrow_sz * userData.r_width;
-#else
-    stride = userData.imgrow_sz;
-#endif
-    //userData.tex_buffer = malloc(userData.image_sz * userData.tiles * sizeof(TEX_BUFFER_FORMAT));
-    //assert(userData.tex_buffer != NULL);
-    //userData.texindex = calloc(sizeof(GLuint), userData.tiles);
-    //userData.texMap = calloc(sizeof(GLuint), userData.tiles);
-    //userData.texfree = calloc(sizeof(GLuint), userData.tiles);
-    //userData.texreload = calloc(sizeof(GLuint), userData.tiles);
-    //tmp = calloc(sizeof(GLuint), userData.tiles);
-    //posData.tiles_x = calloc(sizeof(GLuint), userData.r_height);
-    //posData.tiles_y = calloc(sizeof(GLuint), userData.r_width);
-    //posData.gpu_tiles_x = calloc(sizeof(GLuint), userData.r_height);
-    //posData.gpu_tiles_y = calloc(sizeof(GLuint), userData.r_width);
-    //userData.font_buffer = calloc(sizeof(char), 512 * 256 * 4);
-    //label_tex = calloc(sizeof(GLuint), 10);
 
     esInitContext(&esContext);
     esContext.userData = &userData;
@@ -1856,61 +1927,30 @@ int main(int argc, char *argv[]) {
 
     rad2deg = M_PI / 180.0f;
     pow2Z = pow(2.0, 18.0);
-    posData.gps_latitude = 52.1340037;
-    posData.gps_longitude = 11.6547915;
-    //posData.gps_latitude = 52.0370333;
-    //posData.gps_longitude = 11.6658727;
-    posData.gps_altitude = 0.0;
-    posData.obd_speed = 0.0;
-    posData.obd_volt = 12.4;
-    posData.angle = 0.0f;
-    posData.v = 0.0;
 
-    setPOS(&esContext);
-
-    posData.gpu_t_x = (GLuint) floor(posData.g_x);
-    posData.gpu_t_y = (GLuint) floor(posData.g_y);
+    initPOS(&esContext);
 
 #define SZ 4096
 #define PAGES 8192
-    strncpy(filename, homedir, 50);
-    char *db_file = strncat(filename, "/sit2d_4.db", 50);
-    double *sqlite_cache = (double*) malloc(SZ * PAGES);
-    assert(sqlite3_config(SQLITE_CONFIG_PAGECACHE, &sqlite_cache[0], SZ, PAGES) == SQLITE_OK);
+    double *sqlite_cache_2 = (double*) malloc(SZ * PAGES);
+    assert(sqlite3_config(SQLITE_CONFIG_PAGECACHE, &sqlite_cache_2[0], SZ, PAGES) == SQLITE_OK);
+
     sqlite3_initialize();
-    assert(sqlite3_open_v2(db_file, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
+    assert(sqlite3_open_v2(HOME DB_LVL2, &db_2, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
+    assert(sqlite3_open_v2(HOME DB_LVL3, &db_3, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
 
     verts_len = 0;
-    yama_len = 0;
-    werder_len = 0;
-
-    loadVert(posData.g_x, posData.g_y, BR);
-
-    //exit(0);
 
     esMatrixLoadIdentity(&perspective);
-    esMatrixLoadIdentity(&mvpTex);
     esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
-    esOrtho(&mvpTex, -BR, BR, -BR, BR, -50, 50);
 
-    char buf[50];
+    load_TGA(minus_tex, HOME "RES/minus.tga");
+    load_TGA(plus_tex, HOME "RES/plus.tga");
+    load_TGA(menu_tex, HOME "RES/menu.tga");
+    load_TGA(tex_zahlen, HOME "RES/ascii.tga");
 
-    snprintf(buf, 50, "%s/RES/minus.tga", homedir);
-    load_TGA(minus_tex, buf);
-    snprintf(buf, 50, "%s/RES/plus.tga", homedir);
-    load_TGA(plus_tex, buf);
-    snprintf(buf, 50, "%s/RES/menu.tga", homedir);
-    load_TGA(menu_tex, buf);
-    snprintf(buf, 50, "%s/RES/ascii.tga", homedir);
-    load_TGA(tex_zahlen, buf);
-
-    //load_tex_images(&esContext);
     assert(Init(&esContext));
-    //upload_tex(&esContext);
 
-    //loadVert(posData.g_x, posData.g_y, BR);
-    //glBindBuffer(GL_ARRAY_BUFFER, userData.buffindex[BUFF_INDEX_MAP]);
-    //glBufferData(GL_ARRAY_BUFFER, 12 * vert_len, verts, GL_DYNAMIC_DRAW);
 #ifndef __RASPI__
     esRegisterKeyFunc(&esContext, Key);
 #endif
@@ -1920,9 +1960,11 @@ int main(int argc, char *argv[]) {
     glClearColor(1.0f, 1.0f, 0.0f, 1.0f);
 
     //pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
-    //pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
+    pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
     //pthread_create(&thread_id3, NULL, &jolla, (void*) &esContext);
-    pthread_create(&thread_id4, NULL, &deta, (void*) &esContext);
+    pthread_create(&thread_id4, NULL, &deta_lvl2, (void*) &esContext);
+    pthread_create(&thread_id5, NULL, &deta_lvl3, (void*) &esContext);
+    //pthread_create(&thread_id5, NULL, &ubongo, (void*) &esContext);
 
     esMainLoop(&esContext);
 
@@ -1930,6 +1972,7 @@ int main(int argc, char *argv[]) {
     pthread_join(thread_id2, NULL);
     pthread_join(thread_id3, NULL);
     pthread_join(thread_id4, NULL);
+    pthread_join(thread_id5, NULL);
 
     //ShutDown(&esContext);
 

@@ -5,7 +5,6 @@
 
 #define SCALE 1
 //#define ORTHO 1.5f
-#define V_Z 1.2f
 #define P 0.03f
 
 #ifndef M_PI

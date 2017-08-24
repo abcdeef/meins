@@ -5,6 +5,7 @@
 //  Includes
 //
 #include <GLES2/gl2.h>
+//#include <GLES2/gl2ext.h>
 #include <EGL/egl.h>
 
 #ifdef __cplusplus
@@ -133,6 +134,7 @@ void ESUTIL_API esRegisterKeyFunc(ESContext *esContext, void (ESCALLBACK *drawFu
 //
 void ESUTIL_API esLogMessage(const char *formatStr, ...);
 
+void LoadGLSL(char ** buffer, char * filename);
 //
 ///
 /// \brief Load a shader, check for compile errors, print error messages to output log

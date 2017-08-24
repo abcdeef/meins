@@ -36,38 +36,38 @@
 #endif
 
 typedef struct {
-	GLfloat m[4][4];
+    GLfloat m[4][4];
 } ESMatrix;
 
 typedef struct _escontext {
-	/// Put your user data here...
-	void* userData;
-	void* posData;
-	//void* texData;
-	void* gpsData;
+    /// Put your user data here...
+    void* userData;
+    void* posData;
+    //void* texData;
+    void* gpsData;
 
-	/// Window width
-	GLint width;
+    /// Window width
+    GLint width;
 
-	/// Window height
-	GLint height;
+    /// Window height
+    GLint height;
 
-	/// Window handle
-	EGLNativeWindowType hWnd;
+    /// Window handle
+    EGLNativeWindowType hWnd;
 
-	/// EGL display
-	EGLDisplay eglDisplay;
+    /// EGL display
+    EGLDisplay eglDisplay;
 
-	/// EGL context
-	EGLContext eglContext;
+    /// EGL context
+    EGLContext eglContext;
 
-	/// EGL surface
-	EGLSurface eglSurface;
+    /// EGL surface
+    EGLSurface eglSurface;
 
-	/// Callbacks
-	void (ESCALLBACK *drawFunc)(struct _escontext *);
-	void (ESCALLBACK *keyFunc)(struct _escontext *, unsigned char, int, int);
-	void (ESCALLBACK *updateFunc)(struct _escontext *, float deltaTime);
+    /// Callbacks
+    void (ESCALLBACK *drawFunc)(struct _escontext *);
+    void (ESCALLBACK *keyFunc)(struct _escontext *, unsigned char, int, int);
+    void (ESCALLBACK *updateFunc)(struct _escontext *, float deltaTime);
 
 } ESContext;
 
@@ -129,6 +129,7 @@ void ESUTIL_API esRegisterKeyFunc(ESContext *esContext, void (ESCALLBACK *drawFu
 //
 void ESUTIL_API esLogMessage(const char *formatStr, ...);
 
+void LoadGLSL(char ** buffer, char * filename);
 //
 ///
 /// \brief Load a shader, check for compile errors, print error messages to output log
