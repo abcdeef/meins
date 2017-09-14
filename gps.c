@@ -637,6 +637,7 @@ int minmea_gettime(struct timespec *ts, const struct minmea_date *date, const st
 }
  */
 void nmea(char *line, GPS_T *data) {
+    //printf("\r%s\n", line);
     enum minmea_sentence_id nmea_id = minmea_sentence_id(line, true);
 
     switch (nmea_id) {

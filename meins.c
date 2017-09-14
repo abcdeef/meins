@@ -14,6 +14,7 @@
 #include <linux/input.h>
 #include <sys/reboot.h>
 #include <limits.h>
+#include <inttypes.h>
 #include "util.h"
 #include "gui.h"
 #include "obd.h"
@@ -47,6 +48,7 @@
 #else
 #define TM(START, END,...) 
 #endif
+#define FRACTPART 10000000
 
 #define BUFF_INDEX_GUI 0
 #define BUFF_INDEX_TXT 1
@@ -131,7 +133,7 @@ unsigned short verts_yama_len = 0, verts_werder_len = 0, verts_reis_len = 0;
 
 int sqc_tmp;
 
-void setPOS(ESContext *esContext);
+//void setPOS(ESContext *esContext);
 static int sqc_vertex_lvl2(void *a, int argc, char **argv, char **azColName);
 static int sqc_vertex_lvl3(void *a, int argc, char **argv, char **azColName);
 static int sqc_vertex3(void *a, int argc, char **argv, char **azColName);
@@ -271,7 +273,18 @@ typedef struct {
     float obd_volt;
     float i2c_hum;
     float i2c_temp;
+
+    // Festkomma g_x/g_y Ersatz
+    int gi_x[2];
+    int gi_y[2];
 } POS_T;
+
+void DoubletoFix(double *a, int *ret) {
+    double intpart = 0.0;
+
+    ret[1] = (int) (modf(*a, &intpart) * FRACTPART);
+    ret[0] = (int) intpart;
+}
 
 int printOglError(char *file, int line) {
     //
@@ -810,11 +823,16 @@ void Update(ESContext *esContext, float deltaTime) {
     esMatrixMultiply(&mvpMatrix, &modelview, &perspective);
 #endif
 
+#ifndef __FIN__
     posData->v_x = sinf(mAngle) * posData->v;
     posData->v_y = cosf(mAngle) * posData->v;
 
     posData->g_x += deltaTime * posData->v_x / 3600.0f / posData->osmS;
     posData->g_y -= deltaTime * posData->v_y / 3600.0f / posData->osmS;
+#endif
+
+    DoubletoFix(&posData->g_x, posData->gi_x);
+    DoubletoFix(&posData->g_y, posData->gi_y);
 
     // DRAW
     glClear(GL_COLOR_BUFFER_BIT);
@@ -822,10 +840,12 @@ void Update(ESContext *esContext, float deltaTime) {
     glUseProgram(userData->programMap);
 
     glUniformMatrix4fv(userData->mvpLocMap, 1, GL_FALSE, (GLfloat*) mvpMatrix.m);
-    glUniform2f(userData->offsetHLocMap, floor(posData->g_x), floor(posData->g_y));
+    //glUniform2i(userData->offsetHLocMap, (int) floor(posData->g_x), (int) floor(posData->g_y));
+    glUniform2i(userData->offsetHLocMap, posData->gi_x[0], posData->gi_y[0]);
     glUniform2f(userData->offsetLLocMap, fmod(posData->g_x, 1.0f), fmod(posData->g_y, 1.0f));
+    //glUniform2f(userData->offsetLLocMap, (float) (posData->gi_x[1] / FRACTPART), (float) (posData->gi_y[1] / FRACTPART));
     glUniform2f(userData->MapoffsetLocMap, posData->o_x, posData->o_y);
-
+    PRINTGLERROR
     /*
     pthread_mutex_lock(&mutex_deto_lvl2);
     if (new_tex_lvl2 == 1) {
@@ -1204,6 +1224,9 @@ void initPOS(ESContext * esContext) {
         fseek(pos, 0, SEEK_SET);
     }
 
+    DoubletoFix(&posData->g_x, posData->gi_x);
+    DoubletoFix(&posData->g_y, posData->gi_y);
+
     posData->osmS = 40075017 * cos(posData->gps_latitude * M_PI / 180.0) / pow(2.0, 18.0 + 8.0) * IMAGE_SIZE;
 
     PRINTF("\rinitPOS: g: %f %f a: %f\n", posData->g_x, posData->g_y, posData->angle);
@@ -1213,14 +1236,26 @@ void * foss(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
     //GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
+    PRINTF("\rFOSS gestartet\n");
     time_t t;
     struct tm tm;
 
 #ifdef __RASPI__
     int gpio = -1;
-    //gpio_lcd_init();
+    gpio_lcd_init();
     //bl_write(BL_ON);
 #endif
+
+    memset(line1_str, 32, 20);
+    memset(line2_str, 32, 20);
+
+    for (int f = 0; f < 20; f++) {
+        line1_str[f] = 255;
+        gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+        for (int a = 0; a < 20; a++) {
+            gpio_lcd_send_byte(line1_str[a], GPIO_HIGH);
+        }
+    }
 
     while (1) {
         memset(line1_str, 32, 20);
@@ -1230,7 +1265,7 @@ void * foss(void *esContext) {
         tm = *localtime(&t);
         strftime(line1_str, 21, "%R     %e.%m.%Y", &tm);
 
-        snprintf(line2_str, 21, "U: %.2fV", posData->obd_volt);
+        snprintf(line2_str, 21, "U: %.1fV    V: %.0f", posData->obd_volt, posData->v);
 
 #ifdef __RASPI__
         //gpio = gpio_read(GPIO_PIN);
@@ -1255,7 +1290,7 @@ void * foss(void *esContext) {
         }
 #endif
 #endif
-        printf("\rhum: %.2f  temp: %.2f\n", posData->i2c_hum, posData->i2c_temp);
+        //printf("\rhum: %.2f  temp: %.2f\n", posData->i2c_hum, posData->i2c_temp);
         usleep(1000000);
 
     }
@@ -1490,20 +1525,12 @@ double getDegrees(double lat1, double lon1, double lat2, double lon2) {
     return atan2(sin(lam2 - lam1) * cos(phi2), cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(lam2 - lam1)) * 180 / M_PI;
 }
 
-int delay1(unsigned long mikros) {
-    struct timespec ts;
-    int err;
-
-    ts.tv_sec = mikros / 1000000L;
-    ts.tv_nsec = (mikros % 1000000L) * 1000L;
-    err = nanosleep(&ts, (struct timespec *) NULL);
-    return (err);
-}
-
 void * pinto(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
 
-    long int elapsed;
+    //long int elapsed;
+
+    int counter = 0;
 
     float speed = 0.0f, old_speed = 0.0f, deltatime = 0.0f;
     float deg, old_deg;
@@ -1539,7 +1566,7 @@ void * pinto(void *esContext) {
     t1 = t_start;
 
     while (1) {
-        delay1(500000L);
+        delay(500L);
         old_lat = posData->gps_latitude;
         old_lon = posData->gps_longitude;
 
@@ -1552,7 +1579,7 @@ void * pinto(void *esContext) {
         gettimeofday(&t2, NULL);
         deltatime = (float) (t2.tv_sec - t1.tv_sec + (t2.tv_usec - t1.tv_usec) * 1e-6) * 1000;
 
-        elapsed = (t2.tv_sec - t_start.tv_sec)*1000 + (t2.tv_usec - t_start.tv_usec) / 1000;
+        //elapsed = (t2.tv_sec - t_start.tv_sec)*1000 + (t2.tv_usec - t_start.tv_usec) / 1000;
         t1 = t2;
 
 #ifdef __OBD__
@@ -1646,6 +1673,8 @@ void * pinto(void *esContext) {
 #endif
 
 #ifdef __FIN__
+        struct timeval tv_tmp;
+
         //if (fread(&elapsed, sizeof (long), 1, gps_in) == 1) {
         if (fread(&deltatime, sizeof (float), 1, gps_in) == 1) {
             fread(&g_x, sizeof (double), 1, gps_in);
@@ -1653,35 +1682,47 @@ void * pinto(void *esContext) {
             fread(&dist, sizeof (double), 1, gps_in);
             fread(&speed, sizeof (float), 1, gps_in);
             fread(&deg, sizeof (float), 1, gps_in);
+            fread(&tv_tmp.tv_sec, sizeof (tv_tmp.tv_sec), 1, gps_in);
+            fread(&tv_tmp.tv_usec, sizeof (tv_tmp.tv_usec), 1, gps_in);
+
+            //printf("asd: %f %f\n", posData->g_x, posData->g_y);
+            PRINTF("\rgps_out %i: %i,%i: %f %f %f %f %f %f \n", counter, tv_tmp.tv_sec, tv_tmp.tv_usec, deltatime, g_x, g_y, dist, speed, deg);
+            counter++;
 
             lk = pthread_mutex_lock(&m_pinto);
-            //printf("asd: %f %f\n", posData->g_x, posData->g_y);
-            PRINTF("\rgps_out: %i %f %f %f %f %f %f \n", elapsed, deltatime, g_x, g_y, dist, speed, deg);
+            posData->g_x = g_x;
+            posData->g_y = g_y;
 
-            exit(1);
-            //posData->g_x = g_x;
-            //posData->g_y = g_y;
-            posData->angle = deg;
+            //posData->angle = deg;
             pthread_mutex_unlock(&m_pinto);
+
+            gps_status[0] = 0.0f;
+            gps_status[2] = 1.0f;
         } else {
             fclose(gps_in);
         }
-        gpsData->status = 1;
-#else        
-        //fwrite(&elapsed, sizeof (long), 1, gps_out);
+
+#else
+
+        int64_t tv_sec = (int64_t) t2.tv_sec;
+        int64_t tv_usec = (int64_t) t2.tv_usec;
+
         fwrite(&deltatime, sizeof (float), 1, gps_out);
         fwrite(&posData->g_x, sizeof (double), 1, gps_out);
         fwrite(&posData->g_y, sizeof (double), 1, gps_out);
         fwrite(&dist, sizeof (double), 1, gps_out);
         fwrite(&speed, sizeof (float), 1, gps_out);
         fwrite(&deg, sizeof (float), 1, gps_out);
-        //PRINTF("\rgps_out: %i %f %f %f %f %f %f \n", elapsed, deltatime, posData->g_x, posData->g_y, dist, speed, deg);
+        fwrite(&tv_sec, sizeof (tv_sec), 1, gps_out);
+        fwrite(&tv_usec, sizeof (tv_usec), 1, gps_out);
+        fflush(gps_out);
 
         fwrite(&posData->g_x, sizeof (double), 1, pos);
         fwrite(&posData->g_y, sizeof (double), 1, pos);
         fwrite(&posData->gps_latitude, sizeof (double), 1, pos);
         fwrite(&posData->angle, sizeof (float), 1, pos);
         fseek(pos, 0, SEEK_SET);
+        fflush(pos);
 #endif
     }
 
@@ -1901,6 +1942,11 @@ int main(int argc, char *argv[]) {
     sout = fopen(HOME "/sit2d_debug.txt", "w");
     assert(sout != NULL);
 
+#ifdef __FIN__
+    gps_in = fopen(HOME "sit2d.gps", "rb");
+    assert(gps_in != NULL);
+    PRINTF("%s geladen.\n", HOME "sit2d.gps");
+#else
     strncpy(filename, HOME, 100);
 
     time_t rawtime;
@@ -1909,13 +1955,15 @@ int main(int argc, char *argv[]) {
     info = localtime(&rawtime);
 
     strftime(buffer, 80, "%Y%m%d%H%M_sit2d.gps", info);
+
+    /*struct timeval tv_tmp;
+    gettimeofday(&tv_tmp, NULL);
+
+    sprintf(str, "Value of Pi = %f", M_PI);
+    //printf("%i\n", tv_tmp.tv_sec);
+     */
     gps_out = fopen(strncat(filename, buffer, 80), "wb");
     assert(gps_out != NULL);
-
-#ifdef __FIN__
-    gps_in = fopen(HOME "sit2d.gps", "rb");
-    assert(gps_in != NULL);
-    PRINTF("%s geladen.\n", filename);
 #endif
 
     esInitContext(&esContext);
@@ -1959,7 +2007,7 @@ int main(int argc, char *argv[]) {
     //intro(&esContext);
     glClearColor(1.0f, 1.0f, 0.0f, 1.0f);
 
-    //pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
+    pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
     pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
     //pthread_create(&thread_id3, NULL, &jolla, (void*) &esContext);
     pthread_create(&thread_id4, NULL, &deta_lvl2, (void*) &esContext);

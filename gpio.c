@@ -49,18 +49,6 @@ int bl_write(char *value) {
     return (0);
 }
 
-/*
- * Delay (warten), Zeitangabe in Millisekunden
- */
-void delay(unsigned long millis) {
-    struct timespec ts;
-
-    ts.tv_sec = millis / 1000;
-    ts.tv_nsec = (millis % 1000) * 1000000L;
-
-    int err = nanosleep(&ts, (struct timespec *) NULL);
-}
-
 void gpio_init() {
     if ((mem_fd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
         printf("can't open /dev/mem \n");
