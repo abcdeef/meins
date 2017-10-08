@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <assert.h>
 
 void LoadGLSL(char ** buffer, char * filename) {
     FILE * f = fopen(filename, "rb");
@@ -20,7 +21,10 @@ void LoadGLSL(char ** buffer, char * filename) {
             fread(*buffer, 1, length, f);
         }
         fclose(f);
+    } else {
+        printf("\r%s nicht gefunden\n", filename);
     }
+    assert(f != NULL);
 }
 
 //

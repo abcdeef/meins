@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <time.h>
 #include <linux/reboot.h>
 #include <linux/input.h>
 #include <sys/reboot.h>
@@ -41,7 +42,7 @@
 #define BUFFER_OFFSET(i) ((void *) NULL + (2*(i)))
 #define ROUND(x) roundf(x*10)/10
 //#define MEM(x) (int)(x * 256 )
-#define PRINTF(...) fprintf(sout,__VA_ARGS__);fprintf(stdout,__VA_ARGS__)
+#define PRINTF(...) /*fprintf(sout,__VA_ARGS__);*/fprintf(stdout,__VA_ARGS__)
 #define PRINTGLERROR printOglError(__FILE__, __LINE__);
 #ifdef __TM__
 #define TM(START,END,...) clock_gettime(CLOCK_MONOTONIC, &END);printf("\r%lims\n",(END.tv_sec - START.tv_sec) * 1000 + (END.tv_nsec - START.tv_nsec) / 1000000);
@@ -63,7 +64,7 @@
 //#define FBO_WIDTH 1024
 //#define FBO_HEIGHT 1024
 
-FILE *gps_out, *gps_in, *sout, *pos;
+FILE *gps_out, *gps_in, /* *sout,*/ *eigenschaften;
 
 unsigned char tmp_gl_mode[] = {0, GL_TRIANGLES, GL_TRIANGLES, GL_LINES};
 
@@ -71,8 +72,8 @@ ESContext esContext;
 
 float trans_x = 0.0f, trans_y = 0.0f, trans_z = 0.0f, orto1 = 0.0f, orto2 = 0.0f, orto3 = 0.0f, orto4 = 0.0f;
 
-char line1_str[21];
-char line2_str[21];
+//char line1_str[21];
+//char line2_str[21];
 
 sqlite3 *db_2, *db_3;
 
@@ -136,7 +137,7 @@ int sqc_tmp;
 //void setPOS(ESContext *esContext);
 static int sqc_vertex_lvl2(void *a, int argc, char **argv, char **azColName);
 static int sqc_vertex_lvl3(void *a, int argc, char **argv, char **azColName);
-static int sqc_vertex3(void *a, int argc, char **argv, char **azColName);
+//static int sqc_vertex3(void *a, int argc, char **argv, char **azColName);
 
 void printM4(ESMatrix *wg);
 void ShutDown(int signum);
@@ -240,6 +241,7 @@ typedef struct {
 } UserData;
 
 typedef struct {
+    uint16_t gps_file;
     GLuint gpu_t_x;
     GLuint gpu_t_y;
     GLuint *tiles_x;
@@ -257,7 +259,7 @@ typedef struct {
     double gps_altitude;
     int gps_mode;
     int gps_sat;
-    float obd_speed;
+
     double osmS;
     float osmS2;
     double g_x;
@@ -271,6 +273,13 @@ typedef struct {
     short i2c_z;
 
     float obd_volt;
+    float obd_coolant;
+    float obd_speed;
+    float obd_maf;
+    float obd_o21;
+    float obd_o22;
+    float obd_iat;
+
     float i2c_hum;
     float i2c_temp;
 
@@ -1198,15 +1207,18 @@ int cmpfunc_id(const void * a, const void * b) {
 
 void initPOS(ESContext * esContext) {
     POS_T *posData = esContext->posData;
+    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
-    pos = fopen(HOME "sit2d_pos", "rb+");
-    if (pos == NULL)
-        pos = fopen(HOME "sit2d_pos", "wb");
+    eigenschaften = fopen(HOME "sit2d_pos", "rb+");
+    if (eigenschaften == NULL)
+        eigenschaften = fopen(HOME "sit2d_pos", "wb");
 
-    if (fread(&posData->g_x, sizeof (double), 1, pos) == 1) {
-        fread(&posData->g_y, sizeof (double), 1, pos);
-        fread(&posData->gps_altitude, sizeof (double), 1, pos);
-        fread(&posData->angle, sizeof (float), 1, pos);
+    if (fread(&posData->g_x, sizeof (double), 1, eigenschaften) == 1) {
+        fread(&posData->g_y, sizeof (double), 1, eigenschaften);
+        fread(&posData->gps_altitude, sizeof (double), 1, eigenschaften);
+        fread(&posData->angle, sizeof (float), 1, eigenschaften);
+        fread(&posData->gps_file, sizeof (uint16_t), 1, eigenschaften);
+        posData->gps_file++;
     } else {
         PRINTF("\rinitPOS: sit2d_pos leer.\n");
         posData->gps_latitude = 52.1317029;
@@ -1214,14 +1226,17 @@ void initPOS(ESContext * esContext) {
         posData->gps_altitude = 0.0;
         posData->angle = 0.0f;
 
+        posData->gps_file = 0;
+
         posData->g_x = (posData->gps_longitude + 180.0) / 360.0 * pow2Z;
         posData->g_y = (1.0 - log(tan(posData->gps_latitude * rad2deg) + 1.0 / cos(posData->gps_latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
 
-        fwrite(&posData->g_x, sizeof (double), 1, pos);
-        fwrite(&posData->g_y, sizeof (double), 1, pos);
-        fwrite(&posData->gps_latitude, sizeof (double), 1, pos);
-        fwrite(&posData->angle, sizeof (float), 1, pos);
-        fseek(pos, 0, SEEK_SET);
+        fwrite(&posData->g_x, sizeof (double), 1, eigenschaften);
+        fwrite(&posData->g_y, sizeof (double), 1, eigenschaften);
+        fwrite(&posData->gps_latitude, sizeof (double), 1, eigenschaften);
+        fwrite(&posData->angle, sizeof (float), 1, eigenschaften);
+        fwrite(&posData->gps_file, sizeof (uint16_t), 1, eigenschaften);
+        fseek(eigenschaften, 0, SEEK_SET);
     }
 
     DoubletoFix(&posData->g_x, posData->gi_x);
@@ -1234,65 +1249,149 @@ void initPOS(ESContext * esContext) {
 
 void * foss(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
-    //GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
+    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
+
+    struct timespec spec0, spec1, asd;
+    uint8_t display = 2;
 
     PRINTF("\rFOSS gestartet\n");
+
     time_t t;
     struct tm tm;
+    uint_fast16_t f = 0, d_f[4];
+    memset(&d_f[0], 128, sizeof (d_f));
+    uint32_t button, button_old;
 
-#ifdef __RASPI__
-    int gpio = -1;
     gpio_lcd_init();
+    gpio_get_button(&button_old);
+
+    // Button beleuchten
+    gpio_button_led(5, 1);
+
     //bl_write(BL_ON);
-#endif
 
-    memset(line1_str, 32, 20);
-    memset(line2_str, 32, 20);
-
-    for (int f = 0; f < 20; f++) {
-        line1_str[f] = 255;
-        gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
-        for (int a = 0; a < 20; a++) {
-            gpio_lcd_send_byte(line1_str[a], GPIO_HIGH);
-        }
+    gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+    for (uint_fast8_t f = 0; f < 20; f++) {
+        gpio_lcd_send_byte(255, GPIO_HIGH);
+    }
+    gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+    for (uint_fast8_t f = 0; f < 20; f++) {
+        gpio_lcd_send_byte(32, GPIO_HIGH);
     }
 
+    gpio_set_lcd_maske(display);
+
+    char wert1[8], wert2[8], wert3[8], wert4[8];
+    char wert1_old[8], wert2_old[8], wert3_old[8], wert4_old[8];
+
+    clock_gettime(CLOCK_MONOTONIC, &spec0);
     while (1) {
-        memset(line1_str, 32, 20);
-        memset(line2_str, 32, 20);
+        clock_gettime(CLOCK_MONOTONIC, &spec1);
+        f = (spec1.tv_sec - spec0.tv_sec) * 1000 + (spec1.tv_nsec - spec0.tv_nsec) / 1000000;
+        //printf("\r%ums\n", f);
+        spec0 = spec1;
 
-        t = time(NULL);
-        tm = *localtime(&t);
-        strftime(line1_str, 21, "%R     %e.%m.%Y", &tm);
-
-        snprintf(line2_str, 21, "U: %.1fV    V: %.0f", posData->obd_volt, posData->v);
-
-#ifdef __RASPI__
-        //gpio = gpio_read(GPIO_PIN);
-
-        /*if (gpio == GPIO_HIGH) {
-            bl_write(BL_OFF);
-            ShutDown(1);
-        } else
-            bl_write(BL_ON);
-         */
-#ifdef __LCD__
-        gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
-        for (int a = 0; a < 20; a++) {
-            gpio_lcd_send_byte(line1_str[a], GPIO_HIGH);
+        gpio_get_button(&button);
+        if ((button & (1 << 18)) >> 18 == 0 && (button_old & (1 << 18)) >> 18 == 1) {
+            display++;
+            display %= 4;
+            gpio_button_led(5, 1);
+            memset(&d_f[0], 128, sizeof (d_f));
+            gpio_set_lcd_maske(display);
         }
-        gpio_lcd_send_byte(LCD_LINE_2, GPIO_LOW);
-        for (int a = 0; a < 20; a++) {
-            if (line2_str[a] == 0)
+        button_old = button;
 
-                break;
-            gpio_lcd_send_byte(line2_str[a], GPIO_HIGH);
+        if (display == 0) {
+            t = time(NULL);
+            tm = *localtime(&t);
+
+            strftime(wert1, 6, "%R", &tm);
+            snprintf(wert2, 6, "%3.0f", posData->obd_coolant);
+            snprintf(wert3, 6, "%4.1f", posData->obd_volt);
+            snprintf(wert4, 5, "%3.0f", posData->obd_speed);
+
+            d_f[0] += f;
+            if (d_f[0] > 2000) {
+                gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 5; a++) {
+                    gpio_lcd_send_byte(wert1[a], GPIO_HIGH);
+                }
+                d_f[0] = 0;
+            }
+
+            d_f[1] += f;
+            if (d_f[1] > 5000) {
+                gpio_lcd_send_byte(LCD_LINE_1 + 17, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 3; a++) {
+                    gpio_lcd_send_byte(wert2[a], GPIO_HIGH);
+                }
+                d_f[1] = 0;
+            }
+
+            d_f[2] += f;
+            if (d_f[2] > 500) {
+                gpio_lcd_send_byte(LCD_LINE_2 + 3, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 4; a++) {
+                    gpio_lcd_send_byte(wert3[a], GPIO_HIGH);
+                }
+                gpio_lcd_send_byte(LCD_LINE_2 + 17, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 3; a++) {
+                    gpio_lcd_send_byte(wert4[a], GPIO_HIGH);
+                }
+                d_f[2] = 0;
+            }
+
+        } else if (display == 1) {
+
+            snprintf(wert1, 8, "%1.1f/%1.1f", posData->obd_o21, posData->obd_o22);
+            snprintf(wert2, 7, "%2.0f", posData->obd_iat);
+            snprintf(wert4, 7, "%4.1f", posData->obd_maf);
+
+            d_f[0] += f;
+            if (d_f[0] > 500) {
+                gpio_lcd_send_byte(LCD_LINE_1 + 4, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 7; a++) {
+                    gpio_lcd_send_byte(wert1[a], GPIO_HIGH);
+                }
+                gpio_lcd_send_byte(LCD_LINE_1 + 18, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 2; a++) {
+                    gpio_lcd_send_byte(wert2[a], GPIO_HIGH);
+                }
+                gpio_lcd_send_byte(LCD_LINE_2 + 16, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 4; a++) {
+                    gpio_lcd_send_byte(wert4[a], GPIO_HIGH);
+                }
+
+                d_f[0] = 0;
+            }
+        } else if (display == 2) {
+            snprintf(wert1, 2, "%1.0i", gpsData->fix_quality);
+            snprintf(wert2, 6, "%2.0i/%2.0i", gpsData->satellites_tracked, gpsData->total_sats);
+            snprintf(wert3, 5, "%4.1f", gpsData->HDOP);
+            //printf("%f %f\n",gpsData->HDOP,gpsData->PDOP);
+
+            d_f[0] += f;
+            if (d_f[0] > 1000) {
+                gpio_lcd_send_byte(LCD_LINE_1 + 4, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 1; a++) {
+                    gpio_lcd_send_byte(wert1[a], GPIO_HIGH);
+                }
+                gpio_lcd_send_byte(LCD_LINE_1 + 15, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 5; a++) {
+                    gpio_lcd_send_byte(wert2[a], GPIO_HIGH);
+                }
+                gpio_lcd_send_byte(LCD_LINE_2 + 5, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 4; a++) {
+                    gpio_lcd_send_byte(wert3[a], GPIO_HIGH);
+                }
+                d_f[0] = 0;
+            }
+        } else if (display == 3) {
+            gpio_button_led(5, 0);
+
         }
-#endif
-#endif
-        //printf("\rhum: %.2f  temp: %.2f\n", posData->i2c_hum, posData->i2c_temp);
-        usleep(1000000);
-
+        //printf("|%s|%s|%s|%s|\n", wert1, wert2, wert3, wert4);
+        usleep(100000);
     }
     return NULL;
 }
@@ -1327,7 +1426,7 @@ void * foss(void *esContext) {
 void * ubongo(void *esContext) {
     UserData *userData = ((ESContext*) esContext)->userData;
     POS_T *posData = ((ESContext*) esContext)->posData;
-    unsigned short ret;
+    unsigned short ret = 0;
     sleep(3);
     while (1) {
         int asd = 0;
@@ -1337,7 +1436,7 @@ void * ubongo(void *esContext) {
         //printf("%i %i %i %f %f\n", farbe_yama_len, farbe[farbe_yama_len].index, asd, posData->g_x, posData->g_y);
         //ret = aufLinie(&index_yama[farbe[farbe_yama_len].index], asd, posData->g_x, posData->g_y);
         //ret=166;
-        printf("\raufLinie: %i\n", ret);
+        //printf("\raufLinie: %i\n", ret);
         if (ret != USHRT_MAX) {
             markierung.r = 0.0f;
             markierung.g = 0.0f;
@@ -1356,6 +1455,8 @@ void * ubongo(void *esContext) {
         }
         sleep(1);
     }
+
+    return NULL;
 }
 
 #define SHIFT 4
@@ -1372,6 +1473,7 @@ void * ubongo(void *esContext) {
        ORDER BY l_lvl,l_cf_r,l_cf_g,l_cf_b,t.L_ID,I_SEQ"
 
 void * deta_lvl2(void *esContext) {
+
     POS_T *posData = ((ESContext*) esContext)->posData;
     struct timespec spec0, spec1;
 
@@ -1403,9 +1505,12 @@ void * deta_lvl2(void *esContext) {
     pthread_mutex_unlock(&mutex_deto_lvl2);
 
     TM(spec0, spec1)
+
+    return NULL;
 }
 
 void * deta_lvl3(void *esContext) {
+
     POS_T *posData = ((ESContext*) esContext)->posData;
     struct timespec spec0, spec1;
 
@@ -1437,6 +1542,8 @@ void * deta_lvl3(void *esContext) {
     pthread_mutex_unlock(&mutex_deto_lvl3);
 
     TM(spec0, spec1, '')
+
+    return NULL;
 }
 
 void * jolla(void *esContext) {
@@ -1591,12 +1698,12 @@ void * pinto(void *esContext) {
             } else {
                 printf("OBD: fehler: \n");
             }
-            obdstatus = getobdvalue(obd_serial, 0x42, &tmp_val, numbytes, conv);
+            /*obdstatus = getobdvalue(obd_serial, 0x42, &tmp_val, numbytes, conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_volt = tmp_val;
             } else {
                 printf("OBD: fehler: \n");
-            }
+            }*/
         } else {
             obd_serial = init_OBD(OBD_SERIAL);
         }
@@ -1668,62 +1775,64 @@ void * pinto(void *esContext) {
 
             }
         } else {
+
             gps_open(&gpsd_init, "/dev/ttyAMA0");
         }
 #endif
 
-#ifdef __FIN__
-        struct timeval tv_tmp;
+        if (gps_in != NULL) {
+            struct timeval tv_tmp;
 
-        //if (fread(&elapsed, sizeof (long), 1, gps_in) == 1) {
-        if (fread(&deltatime, sizeof (float), 1, gps_in) == 1) {
-            fread(&g_x, sizeof (double), 1, gps_in);
-            fread(&g_y, sizeof (double), 1, gps_in);
-            fread(&dist, sizeof (double), 1, gps_in);
-            fread(&speed, sizeof (float), 1, gps_in);
-            fread(&deg, sizeof (float), 1, gps_in);
-            fread(&tv_tmp.tv_sec, sizeof (tv_tmp.tv_sec), 1, gps_in);
-            fread(&tv_tmp.tv_usec, sizeof (tv_tmp.tv_usec), 1, gps_in);
+            //if (fread(&elapsed, sizeof (long), 1, gps_in) == 1) {
+            if (fread(&deltatime, sizeof (float), 1, gps_in) == 1) {
+                fread(&gpsData->fix_quality, sizeof (gpsData->fix_quality), 1, gps_in);
+                fread(&g_x, sizeof (double), 1, gps_in);
+                fread(&g_y, sizeof (double), 1, gps_in);
+                fread(&dist, sizeof (double), 1, gps_in);
+                fread(&speed, sizeof (float), 1, gps_in);
+                fread(&deg, sizeof (float), 1, gps_in);
+                fread(&tv_tmp.tv_sec, sizeof (tv_tmp.tv_sec), 1, gps_in);
+                fread(&tv_tmp.tv_usec, sizeof (tv_tmp.tv_usec), 1, gps_in);
 
-            //printf("asd: %f %f\n", posData->g_x, posData->g_y);
-            PRINTF("\rgps_out %i: %i,%i: %f %f %f %f %f %f \n", counter, tv_tmp.tv_sec, tv_tmp.tv_usec, deltatime, g_x, g_y, dist, speed, deg);
-            counter++;
+                //printf("asd: %f %f\n", posData->g_x, posData->g_y);
+                PRINTF("\rgps_out %i: %i,%i: %f %f %f %f %f %f \n", counter, tv_tmp.tv_sec, tv_tmp.tv_usec, deltatime, g_x, g_y, dist, speed, deg);
+                counter++;
 
-            lk = pthread_mutex_lock(&m_pinto);
-            posData->g_x = g_x;
-            posData->g_y = g_y;
+                lk = pthread_mutex_lock(&m_pinto);
+                posData->g_x = g_x;
+                posData->g_y = g_y;
 
-            //posData->angle = deg;
-            pthread_mutex_unlock(&m_pinto);
+                //posData->angle = deg;
+                pthread_mutex_unlock(&m_pinto);
 
-            gps_status[0] = 0.0f;
-            gps_status[2] = 1.0f;
+                gps_status[0] = 0.0f;
+                gps_status[2] = 1.0f;
+            } else {
+                fclose(gps_in);
+            }
+
         } else {
-            fclose(gps_in);
+            int64_t tv_sec = (int64_t) t2.tv_sec;
+            int64_t tv_usec = (int64_t) t2.tv_usec;
+
+            fwrite(&deltatime, sizeof (float), 1, gps_out);
+            fwrite(&gpsData->fix_quality, sizeof (gpsData->fix_quality), 1, gps_out);
+            fwrite(&posData->g_x, sizeof (double), 1, gps_out);
+            fwrite(&posData->g_y, sizeof (double), 1, gps_out);
+            fwrite(&dist, sizeof (double), 1, gps_out);
+            fwrite(&speed, sizeof (float), 1, gps_out);
+            fwrite(&deg, sizeof (float), 1, gps_out);
+            fwrite(&tv_sec, sizeof (tv_sec), 1, gps_out);
+            fwrite(&tv_usec, sizeof (tv_usec), 1, gps_out);
+            fflush(gps_out);
+
+            fwrite(&posData->g_x, sizeof (double), 1, eigenschaften);
+            fwrite(&posData->g_y, sizeof (double), 1, eigenschaften);
+            fwrite(&posData->gps_latitude, sizeof (double), 1, eigenschaften);
+            fwrite(&posData->angle, sizeof (float), 1, eigenschaften);
+            fseek(eigenschaften, 0, SEEK_SET);
+            fflush(eigenschaften);
         }
-
-#else
-
-        int64_t tv_sec = (int64_t) t2.tv_sec;
-        int64_t tv_usec = (int64_t) t2.tv_usec;
-
-        fwrite(&deltatime, sizeof (float), 1, gps_out);
-        fwrite(&posData->g_x, sizeof (double), 1, gps_out);
-        fwrite(&posData->g_y, sizeof (double), 1, gps_out);
-        fwrite(&dist, sizeof (double), 1, gps_out);
-        fwrite(&speed, sizeof (float), 1, gps_out);
-        fwrite(&deg, sizeof (float), 1, gps_out);
-        fwrite(&tv_sec, sizeof (tv_sec), 1, gps_out);
-        fwrite(&tv_usec, sizeof (tv_usec), 1, gps_out);
-        fflush(gps_out);
-
-        fwrite(&posData->g_x, sizeof (double), 1, pos);
-        fwrite(&posData->g_y, sizeof (double), 1, pos);
-        fwrite(&posData->gps_latitude, sizeof (double), 1, pos);
-        fwrite(&posData->angle, sizeof (float), 1, pos);
-        fseek(pos, 0, SEEK_SET);
-        fflush(pos);
-#endif
     }
 
 
@@ -1772,7 +1881,7 @@ void esMainLoop(ESContext * esContext) {
 
         if (totaltime > 4.0f) {
 
-            PRINTF("\rFPS: %3.1f FRAMETIME: %i %4.1f %i  us: %u\n", frames / totaltime, ms_min, (float) ms_avg / frames, ms_max, us);
+            //PRINTF("\rFPS: %3.1f FRAMETIME: %i %4.1f %i  us: %u\n", frames / totaltime, ms_min, (float) ms_avg / frames, ms_max, us);
 
             if ((frames / totaltime) > 30.0) {
                 us += 1000;
@@ -1831,6 +1940,7 @@ static int sqc_vertex_lvl2(void *a, int argc, char **argv, char **azColName) {
 
         tmp_farbe_yama_len++;
     } else {
+
         tmp_farbe_yama[tmp_farbe_yama_len - 1].len++;
     }
 
@@ -1875,6 +1985,7 @@ static int sqc_vertex_lvl3(void *a, int argc, char **argv, char **azColName) {
 
         tmp_farbe_werder_len++;
     } else {
+
         tmp_farbe_werder[tmp_farbe_werder_len - 1].len++;
     }
 
@@ -1936,47 +2047,29 @@ int main(int argc, char *argv[]) {
 #ifdef __RASPI__
     //bl_write(BL_ON);
 #endif
-
     char filename[100], buffer[80];
-
-    sout = fopen(HOME "/sit2d_debug.txt", "w");
-    assert(sout != NULL);
-
-#ifdef __FIN__
-    gps_in = fopen(HOME "sit2d.gps", "rb");
-    assert(gps_in != NULL);
-    PRINTF("%s geladen.\n", HOME "sit2d.gps");
-#else
-    strncpy(filename, HOME, 100);
-
-    time_t rawtime;
-    struct tm *info;
-    time(&rawtime);
-    info = localtime(&rawtime);
-
-    strftime(buffer, 80, "%Y%m%d%H%M_sit2d.gps", info);
-
-    /*struct timeval tv_tmp;
-    gettimeofday(&tv_tmp, NULL);
-
-    sprintf(str, "Value of Pi = %f", M_PI);
-    //printf("%i\n", tv_tmp.tv_sec);
-     */
-    gps_out = fopen(strncat(filename, buffer, 80), "wb");
-    assert(gps_out != NULL);
-#endif
 
     esInitContext(&esContext);
     esContext.userData = &userData;
     esContext.posData = &posData;
     esContext.gpsData = &gpsData;
 
-    esCreateWindow(&esContext, "SiT2D", userData.width, userData.height, ES_WINDOW_RGB);
-
     rad2deg = M_PI / 180.0f;
     pow2Z = pow(2.0, 18.0);
 
     initPOS(&esContext);
+
+    if (argc == 2) {
+        gps_in = fopen(argv[1], "rb");
+        assert(gps_in != NULL);
+        PRINTF("%s geladen.\n", argv[1]);
+    } else {
+        sprintf(filename, "%s/sit2d_%i.gps", HOME, posData.gps_file);
+        gps_out = fopen(filename, "wb");
+        assert(gps_out != NULL);
+    }
+
+    esCreateWindow(&esContext, "SiT2D", userData.width, userData.height, ES_WINDOW_RGB);
 
 #define SZ 4096
 #define PAGES 8192
@@ -1999,15 +2092,15 @@ int main(int argc, char *argv[]) {
 
     assert(Init(&esContext));
 
-#ifndef __RASPI__
-    esRegisterKeyFunc(&esContext, Key);
-#endif
-    PRINTF("\rinit abgeschlossen\n");
-
     //intro(&esContext);
     glClearColor(1.0f, 1.0f, 0.0f, 1.0f);
 
+#ifdef __RASPI__
     pthread_create(&thread_id1, NULL, &foss, (void*) &esContext);
+#else
+    esRegisterKeyFunc(&esContext, Key);
+#endif
+
     pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
     //pthread_create(&thread_id3, NULL, &jolla, (void*) &esContext);
     pthread_create(&thread_id4, NULL, &deta_lvl2, (void*) &esContext);
@@ -2018,7 +2111,7 @@ int main(int argc, char *argv[]) {
 
     pthread_join(thread_id1, NULL);
     pthread_join(thread_id2, NULL);
-    pthread_join(thread_id3, NULL);
+    //pthread_join(thread_id3, NULL);
     pthread_join(thread_id4, NULL);
     pthread_join(thread_id5, NULL);
 

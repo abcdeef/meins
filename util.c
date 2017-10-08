@@ -6,6 +6,7 @@
 //#include <png.h>
 #include <assert.h>
 #include <sys/stat.h>
+#include <time.h>
 #include "util.h"
 
 #define EXIST F_OK

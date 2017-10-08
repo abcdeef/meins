@@ -645,7 +645,7 @@ void nmea(char *line, GPS_T *data) {
         {
             struct minmea_sentence_rmc frame;
             if (minmea_parse_rmc(&frame, line)) {
-                char buffer[80];
+                //char buffer[80];
                 struct tm tmp;
 
                 tmp.tm_year = frame.date.year + 100;
@@ -692,6 +692,8 @@ void nmea(char *line, GPS_T *data) {
             if (minmea_parse_gsa(&frame, line)) {
                 data->fix_type = frame.fix_type;
                 data->PDOP = minmea_tofloat(&frame.pdop);
+                data->HDOP = minmea_tofloat(&frame.hdop);
+                
             } else {
                 printf(INDENT_SPACES "$xxGGA sentence is not parsed\n");
             }
@@ -704,6 +706,7 @@ void nmea(char *line, GPS_T *data) {
                 data->fix_quality = frame.fix_quality;
                 data->latitude = minmea_tocoord(&frame.latitude);
                 data->longitude = minmea_tocoord(&frame.longitude);
+                data->satellites_tracked = frame.satellites_tracked;
             } else {
                 printf(INDENT_SPACES "$xxGGA sentence is not parsed\n");
             }
@@ -722,6 +725,25 @@ void nmea(char *line, GPS_T *data) {
                 printf(INDENT_SPACES "speed kph = %f\n",
                         minmea_tofloat(&frame.speed_kph));*/
                 data->angle = minmea_tofloat(&frame.true_track_degrees);
+
+            } else {
+                printf(INDENT_SPACES "sentence is not parsed\n");
+            }
+        }
+            break;
+        case MINMEA_SENTENCE_GSV:
+        {
+            struct minmea_sentence_gsv frame;
+            if (minmea_parse_gsv(&frame, line)) {
+                data->total_sats = frame.total_sats;
+                //printf(INDENT_SPACES "message %d of %d\n", frame.msg_nr, frame.total_msgs);
+                /*printf(INDENT_SPACES "sattelites in view: %d\n", frame.total_sats);
+                for (int i = 0; i < 4; i++)
+                    printf(INDENT_SPACES "sat nr %d, elevation: %d, azimuth: %d, snr: %d dbm\n",
+                        frame.sats[i].nr,
+                        frame.sats[i].elevation,
+                        frame.sats[i].azimuth,
+                        frame.sats[i].snr);*/
             } else {
                 printf(INDENT_SPACES "sentence is not parsed\n");
             }
