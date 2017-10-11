@@ -1330,10 +1330,18 @@ void * foss(void *esContext) {
 
             d_f[2] += f;
             if (d_f[2] > 500) {
-                gpio_lcd_send_byte(LCD_LINE_2 + 3, GPIO_LOW);
-                for (uint_fast8_t a = 0; a < 4; a++) {
-                    gpio_lcd_send_byte(wert3[a], GPIO_HIGH);
+                int ret = memcmp(wert3, wert3_old, 2);
+                if (ret == 0) {
+                    gpio_lcd_send_byte(LCD_LINE_2 + 6, GPIO_LOW);
+                    gpio_lcd_send_byte(wert3[3], GPIO_HIGH);
+                } else {
+                    gpio_lcd_send_byte(LCD_LINE_2 + 3, GPIO_LOW);
+                    for (uint_fast8_t a = 0; a < 4; a++) {
+                        gpio_lcd_send_byte(wert3[a], GPIO_HIGH);
+                    }
                 }
+                memcpy(&wert3_old[0], &wert3[0], 4);
+
                 gpio_lcd_send_byte(LCD_LINE_2 + 17, GPIO_LOW);
                 for (uint_fast8_t a = 0; a < 3; a++) {
                     gpio_lcd_send_byte(wert4[a], GPIO_HIGH);
@@ -1380,10 +1388,19 @@ void * foss(void *esContext) {
                 for (uint_fast8_t a = 0; a < 5; a++) {
                     gpio_lcd_send_byte(wert2[a], GPIO_HIGH);
                 }
-                gpio_lcd_send_byte(LCD_LINE_2 + 5, GPIO_LOW);
-                for (uint_fast8_t a = 0; a < 4; a++) {
-                    gpio_lcd_send_byte(wert3[a], GPIO_HIGH);
+
+                int ret = memcmp(wert3, wert3_old, 2);
+                if (ret == 0) {
+                    gpio_lcd_send_byte(LCD_LINE_2 + 8, GPIO_LOW);
+                    gpio_lcd_send_byte(wert3[3], GPIO_HIGH);
+                } else {
+                    gpio_lcd_send_byte(LCD_LINE_2 + 5, GPIO_LOW);
+                    for (uint_fast8_t a = 0; a < 4; a++) {
+                        gpio_lcd_send_byte(wert3[a], GPIO_HIGH);
+                    }
                 }
+                memcpy(&wert3_old[0], &wert3[0], 4);
+
                 d_f[0] = 0;
             }
         } else if (display == 3) {
@@ -1635,6 +1652,7 @@ double getDegrees(double lat1, double lon1, double lat2, double lon2) {
 void * pinto(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
 
+    PRINTF("\rPINTO gestartet\n");
     //long int elapsed;
 
     int counter = 0;
@@ -1647,13 +1665,13 @@ void * pinto(void *esContext) {
 
 #ifdef __OBD__
     int obd_serial = -1;
-    int obd_pid = 5; //Engine Coolant Temperature
+    //int obd_pid = 5; //Engine Coolant Temperature
 
     enum obd_serial_status obdstatus;
     float tmp_val;
-    unsigned int cmdid = obdcmds_mode1[obd_pid].cmdid;
-    int numbytes = obdcmds_mode1[obd_pid].bytes_returned;
-    OBDConvFunc conv = obdcmds_mode1[obd_pid].conv;
+    //unsigned int cmdid = obdcmds_mode1[obd_pid].cmdid;
+    //int numbytes = obdcmds_mode1[obd_pid].bytes_returned;
+    //OBDConvFunc conv = obdcmds_mode1[obd_pid].conv;
 #endif
 
     int gpsd_init = -1;
@@ -1691,19 +1709,35 @@ void * pinto(void *esContext) {
 
 #ifdef __OBD__
         if (obd_serial != -1) {
-            //Engine Coolant Temperature
-            obdstatus = getobdvalue(obd_serial, 5, &tmp_val, numbytes, conv);
+            obdstatus = getobdvalue(obd_serial, 5, &tmp_val, obdcmds_mode1[5].bytes_returned, obdcmds_mode1[5].conv);
             if (OBD_SUCCESS == obdstatus) {
-                posData->obd_speed = tmp_val;
+                posData->obd_coolant = tmp_val;
+                printf("\robd_coolant: %f\n", tmp_val);
             } else {
                 printf("OBD: fehler: \n");
             }
-            /*obdstatus = getobdvalue(obd_serial, 0x42, &tmp_val, numbytes, conv);
+            obdstatus = getobdvalue(obd_serial, 0x10, &tmp_val, obdcmds_mode1[0x10].bytes_returned, obdcmds_mode1[0x10].conv);
             if (OBD_SUCCESS == obdstatus) {
-                posData->obd_volt = tmp_val;
+                posData->obd_maf = tmp_val;
+                printf("\robd_maf: %f\n", tmp_val);
+            } else {
+                printf("OBD: fehler: \n");
+            }
+            obdstatus = getobdvalue(obd_serial, 0x0F, &tmp_val, obdcmds_mode1[0x0F].bytes_returned, obdcmds_mode1[0x0F].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_iat = tmp_val;
+                printf("\robd_iat: %f\n", tmp_val);
+            } else {
+                printf("OBD: fehler: \n");
+            }/*
+            obdstatus = getobdvalue(obd_serial, 0x0F, &tmp_val, obdcmds_mode1[0x0F].bytes_returned, 1);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_iat = tmp_val;
+                printf("\robd_iat: %f\n", tmp_val);
             } else {
                 printf("OBD: fehler: \n");
             }*/
+               // blindcmd(fd, "ATRV", 1);
         } else {
             obd_serial = init_OBD(OBD_SERIAL);
         }
@@ -1785,6 +1819,7 @@ void * pinto(void *esContext) {
 
             //if (fread(&elapsed, sizeof (long), 1, gps_in) == 1) {
             if (fread(&deltatime, sizeof (float), 1, gps_in) == 1) {
+                fread(&gpsData->stamp, sizeof (gpsData->stamp), 1, gps_in);
                 fread(&gpsData->fix_quality, sizeof (gpsData->fix_quality), 1, gps_in);
                 fread(&g_x, sizeof (double), 1, gps_in);
                 fread(&g_y, sizeof (double), 1, gps_in);
@@ -1816,6 +1851,7 @@ void * pinto(void *esContext) {
             int64_t tv_usec = (int64_t) t2.tv_usec;
 
             fwrite(&deltatime, sizeof (float), 1, gps_out);
+            fwrite(&gpsData->stamp, sizeof (gpsData->stamp), 1, gps_out);
             fwrite(&gpsData->fix_quality, sizeof (gpsData->fix_quality), 1, gps_out);
             fwrite(&posData->g_x, sizeof (double), 1, gps_out);
             fwrite(&posData->g_y, sizeof (double), 1, gps_out);

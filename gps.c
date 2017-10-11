@@ -655,6 +655,7 @@ void nmea(char *line, GPS_T *data) {
                 tmp.tm_min = frame.time.minutes;
                 tmp.tm_sec = frame.time.seconds;
 
+#ifdef __RASPI__
                 putenv("TZ=UTC");
                 data->stamp = mktime(&tmp);
                 putenv("TZ=Europe/Berlin");
@@ -662,6 +663,7 @@ void nmea(char *line, GPS_T *data) {
                 if (abs(data->stamp - time(NULL)) > 60) {
                     stime(&data->stamp);
                 }
+#endif
                 /*
                 struct tm tm2 = *localtime(&data->stamp);
 
@@ -693,7 +695,7 @@ void nmea(char *line, GPS_T *data) {
                 data->fix_type = frame.fix_type;
                 data->PDOP = minmea_tofloat(&frame.pdop);
                 data->HDOP = minmea_tofloat(&frame.hdop);
-                
+
             } else {
                 printf(INDENT_SPACES "$xxGGA sentence is not parsed\n");
             }
