@@ -643,7 +643,7 @@ int readserialdata(int fd, char *buf, int n) {
             perror("Error in readserialdata");
         }
         if (-1 != nbytes) {
-            printf("Read bytes '%s'\n", bufptr);
+            //printf("Read bytes '%s'\n", bufptr);
             retval += nbytes; // Increment bytecount
             bufptr += nbytes; // Move pointer forward
         }
@@ -652,30 +652,30 @@ int readserialdata(int fd, char *buf, int n) {
             return -1;
         }
         if (OBDCOMM_TIMEOUT < 1000000l * (curr.tv_sec - start.tv_sec) + (curr.tv_usec - start.tv_usec)) {
-            printf("Timeout!\n");
+            printf("%s: Timeout!\n", buf);
             return -1;
         }
     } while (retval == 0 || bufptr[-1] != '>');
 
-    appendseriallog(buf, SERIAL_IN);
     return retval;
 }
 
 void readtonextprompt(int fd) {
     char retbuf[4096]; // Buffer to store returned stuff
     readserialdata(fd, retbuf, sizeof (retbuf));
+    //printf("|\r%s\n|", retbuf);
 }
 
 void blindcmd(int fd, const char *cmd, int no_response) {
     char outstr[1024];
-    printf("CMD: %s\n", cmd);
+    //printf("CMD: %s\n", cmd);
     snprintf(outstr, sizeof (outstr), "%s%s\0", cmd, OBDCMD_NEWLINE);
     //appendseriallog(outstr, SERIAL_OUT);
     write(fd, outstr, strlen(outstr));
-    if (0 != no_response) {
+    /*if (0 != no_response) {
         sleep(1);
         readtonextprompt(fd);
-    }
+    }*/
 }
 
 static long attempt_upgradebaudrate(int fd, long rate, long previousrate) {
@@ -897,8 +897,8 @@ enum obd_serial_status getobdbytes(int fd, unsigned int mode, unsigned int cmd, 
             sendbuflen = snprintf(sendbuf, sizeof (sendbuf), "%02X%02X%01X" OBDCMD_NEWLINE, mode, cmd, numbytes_expected);
         }
     }
-
-    appendseriallog(sendbuf, SERIAL_OUT);
+    //printf("\nsendbuf: %s\n", sendbuf);
+    
     if (write(fd, sendbuf, sendbuflen) < sendbuflen) {
         return OBD_ERROR;
     }
@@ -1048,22 +1048,19 @@ int init_OBD(char *serial) {
     if (0 > upgradebaudrate(fd, baudrate_target, baudrate)) {
         fprintf(stderr, "Error upgrading baudrate. Continuing, but may suffer issues\n");
     }
-   
+
     blindcmd(fd, "0100", 1);
-    
-     
+
     // Disable command echo [elm327]
     blindcmd(fd, "ATE0", 1);
     // Disable linefeeds [an extra byte of speed can't hurt]
     blindcmd(fd, "ATL0", 1);
     // Don't insert spaces [readability is for ugly bags of mostly water]
     blindcmd(fd, "ATS0", 1);
-    // Then do it again to make sure the command really worked
-    //blindcmd(fd, "0100", 1);
-    
-       
-    blindcmd(fd, "ATTP5", 1);
+
+    blindcmd(fd, "ATTP5", 1); // Lada Niva Euro4
+
     blindcmd(fd, "0100", 1);
 
-     return fd;
+    return fd;
 }
