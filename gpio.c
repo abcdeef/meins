@@ -182,7 +182,7 @@ void gpio_set_lcd_maske(uint_fast8_t display) {
         gpio_lcd_send_byte('I', GPIO_HIGH);
         gpio_lcd_send_byte(':', GPIO_HIGH);
 
-        gpio_lcd_send_byte(LCD_LINE_2 + 13, GPIO_LOW);
+        gpio_lcd_send_byte(LCD_LINE_2 + 12, GPIO_LOW);
         gpio_lcd_send_byte('M', GPIO_HIGH);
         gpio_lcd_send_byte('A', GPIO_HIGH);
         gpio_lcd_send_byte('F', GPIO_HIGH);

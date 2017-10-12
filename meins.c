@@ -1247,12 +1247,92 @@ void initPOS(ESContext * esContext) {
     PRINTF("\rinitPOS: g: %f %f a: %f\n", posData->g_x, posData->g_y, posData->angle);
 }
 
+void * lenovo(void *esContext) {
+    POS_T *posData = ((ESContext*) esContext)->posData;
+    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
+
+    PRINTF("\LENOVO gestartet\n");
+
+#ifdef __OBD__
+    // für obd_volt
+    char outstr[1024];
+    char retbuf[4096];
+    int nbytes;
+    //     
+
+    int obd_serial = -1;
+    //int obd_pid = 5; //Engine Coolant Temperature
+
+    enum obd_serial_status obdstatus;
+    float tmp_val;
+    //unsigned int cmdid = obdcmds_mode1[obd_pid].cmdid;
+    //int numbytes = obdcmds_mode1[obd_pid].bytes_returned;
+    //OBDConvFunc conv = obdcmds_mode1[obd_pid].conv;
+#endif
+
+    while (1) {
+        usleep(200000);
+#ifdef __OBD__
+        if (obd_serial != -1) {
+            snprintf(outstr, sizeof (outstr), "%s%s\0", "ATRV", "\r");
+            write(obd_serial, outstr, strlen(outstr));
+
+            nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
+            retbuf[4] = '\0';
+
+            sscanf(retbuf, "%f", &posData->obd_volt);
+
+            obdstatus = getobdvalue(obd_serial, 0x0D, &tmp_val, obdcmds_mode1[0x0D].bytes_returned, obdcmds_mode1[0x0D].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_speed = tmp_val;
+            } else {
+                printf("OBD: fehler: \n");
+            }
+
+
+            obdstatus = getobdvalue(obd_serial, 0x05, &tmp_val, obdcmds_mode1[0x05].bytes_returned, obdcmds_mode1[0x05].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_coolant = tmp_val;
+            } else {
+                printf("OBD: fehler: \n");
+            }
+            obdstatus = getobdvalue(obd_serial, 0x10, &tmp_val, obdcmds_mode1[0x10].bytes_returned, obdcmds_mode1[0x10].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_maf = tmp_val;
+            } else {
+                printf("OBD: fehler: \n");
+            }
+            obdstatus = getobdvalue(obd_serial, 0x0F, &tmp_val, obdcmds_mode1[0x0F].bytes_returned, obdcmds_mode1[0x0F].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_iat = tmp_val;
+            } else {
+                printf("OBD: fehler: \n");
+            }
+            obdstatus = getobdvalue(obd_serial, 0x14, &tmp_val, obdcmds_mode1[0x14].bytes_returned, obdcmds_mode1[0x14].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_o21 = tmp_val;
+            } else {
+                printf("OBD: fehler: \n");
+            }
+            obdstatus = getobdvalue(obd_serial, 0x15, &tmp_val, obdcmds_mode1[0x15].bytes_returned, obdcmds_mode1[0x15].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_o22 = tmp_val;
+            } else {
+                printf("OBD: fehler: \n");
+            }
+        } else {
+            obd_serial = init_OBD(OBD_SERIAL);
+        }
+#endif
+    }
+}
+
 void * foss(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     struct timespec spec0, spec1, asd;
-    uint8_t display = 2;
+    uint8_t display = 0;
 
     PRINTF("\rFOSS gestartet\n");
 
@@ -1408,7 +1488,7 @@ void * foss(void *esContext) {
 
         }
         //printf("|%s|%s|%s|%s|\n", wert1, wert2, wert3, wert4);
-        usleep(100000);
+        usleep(200000);
     }
     return NULL;
 }
@@ -1653,7 +1733,6 @@ void * pinto(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
 
     PRINTF("\rPINTO gestartet\n");
-    //long int elapsed;
 
     int counter = 0;
 
@@ -1664,14 +1743,15 @@ void * pinto(void *esContext) {
     double g_x, g_y, old_lat, old_lon, old_g_x, old_g_y, dist;
 
 #ifdef __OBD__
-    int obd_serial = -1;
-    //int obd_pid = 5; //Engine Coolant Temperature
+    // für obd_volt
+    char outstr[1024];
+    char retbuf[4096];
+    int nbytes;
+    //     
 
+    int obd_serial = -1;
     enum obd_serial_status obdstatus;
     float tmp_val;
-    //unsigned int cmdid = obdcmds_mode1[obd_pid].cmdid;
-    //int numbytes = obdcmds_mode1[obd_pid].bytes_returned;
-    //OBDConvFunc conv = obdcmds_mode1[obd_pid].conv;
 #endif
 
     int gpsd_init = -1;
@@ -1691,7 +1771,8 @@ void * pinto(void *esContext) {
     t1 = t_start;
 
     while (1) {
-        delay(500L);
+        usleep(200000);
+
         old_lat = posData->gps_latitude;
         old_lon = posData->gps_longitude;
 
@@ -1709,35 +1790,52 @@ void * pinto(void *esContext) {
 
 #ifdef __OBD__
         if (obd_serial != -1) {
-            obdstatus = getobdvalue(obd_serial, 5, &tmp_val, obdcmds_mode1[5].bytes_returned, obdcmds_mode1[5].conv);
+            snprintf(outstr, sizeof (outstr), "%s%s\0", "ATRV", "\r");
+            write(obd_serial, outstr, strlen(outstr));
+
+            nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
+            retbuf[4] = '\0';
+
+            sscanf(retbuf, "%f", &posData->obd_volt);
+
+            obdstatus = getobdvalue(obd_serial, 0x0D, &tmp_val, obdcmds_mode1[0x0D].bytes_returned, obdcmds_mode1[0x0D].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_speed = tmp_val;
+            } else {
+                printf("OBD: fehler: \n");
+            }
+
+
+            obdstatus = getobdvalue(obd_serial, 0x05, &tmp_val, obdcmds_mode1[0x05].bytes_returned, obdcmds_mode1[0x05].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_coolant = tmp_val;
-                printf("\robd_coolant: %f\n", tmp_val);
             } else {
                 printf("OBD: fehler: \n");
             }
             obdstatus = getobdvalue(obd_serial, 0x10, &tmp_val, obdcmds_mode1[0x10].bytes_returned, obdcmds_mode1[0x10].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_maf = tmp_val;
-                printf("\robd_maf: %f\n", tmp_val);
             } else {
                 printf("OBD: fehler: \n");
             }
             obdstatus = getobdvalue(obd_serial, 0x0F, &tmp_val, obdcmds_mode1[0x0F].bytes_returned, obdcmds_mode1[0x0F].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_iat = tmp_val;
-                printf("\robd_iat: %f\n", tmp_val);
             } else {
                 printf("OBD: fehler: \n");
-            }/*
-            obdstatus = getobdvalue(obd_serial, 0x0F, &tmp_val, obdcmds_mode1[0x0F].bytes_returned, 1);
+            }
+            obdstatus = getobdvalue(obd_serial, 0x14, &tmp_val, obdcmds_mode1[0x14].bytes_returned, obdcmds_mode1[0x14].conv);
             if (OBD_SUCCESS == obdstatus) {
-                posData->obd_iat = tmp_val;
-                printf("\robd_iat: %f\n", tmp_val);
+                posData->obd_o21 = tmp_val;
             } else {
                 printf("OBD: fehler: \n");
-            }*/
-               // blindcmd(fd, "ATRV", 1);
+            }
+            obdstatus = getobdvalue(obd_serial, 0x15, &tmp_val, obdcmds_mode1[0x15].bytes_returned, obdcmds_mode1[0x15].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_o22 = tmp_val;
+            } else {
+                printf("OBD: fehler: \n");
+            }
         } else {
             obd_serial = init_OBD(OBD_SERIAL);
         }
