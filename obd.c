@@ -18,6 +18,9 @@
 #define OBDCMD_NEWLINE "\r"
 #define OBDCOMM_TIMEOUT 10000000l
 
+extern FILE *sout;
+#define PRINTF(...) fprintf(sout,__VA_ARGS__);fprintf(stdout,__VA_ARGS__)
+
 int modifybaud(int fd, long baudrate);
 
 float obdConvert_04(unsigned int A, unsigned int B, unsigned int C, unsigned int D) {
@@ -603,9 +606,9 @@ int modifybaud(int fd, long baudrate) {
 }
 #define SERIAL_OUT 1
 #define SERIAL_IN 0
-static FILE *seriallog = NULL;
+//static FILE *seriallog = NULL;
 
-static void appendseriallog(const char *line, int out) {
+/*static void appendseriallog(const char *line, int out) {
     if (NULL != seriallog) {
         char timestr[200];
         time_t t;
@@ -624,7 +627,7 @@ static void appendseriallog(const char *line, int out) {
         fprintf(seriallog, "%s(%s): '%s'\n", timestr, out == SERIAL_OUT ? "out" : "in", line);
         fflush(seriallog);
     }
-}
+}*/
 
 int readserialdata(int fd, char *buf, int n) {
     char *bufptr = buf; // current position in buf
@@ -639,11 +642,11 @@ int readserialdata(int fd, char *buf, int n) {
     int nbytes; // Number of bytes read
     do {
         nbytes = read(fd, bufptr, buf + n - bufptr - 1);
+
         if (-1 == nbytes && EAGAIN != errno) {
             perror("Error in readserialdata");
         }
         if (-1 != nbytes) {
-            //printf("Read bytes '%s'\n", bufptr);
             retval += nbytes; // Increment bytecount
             bufptr += nbytes; // Move pointer forward
         }
@@ -652,30 +655,32 @@ int readserialdata(int fd, char *buf, int n) {
             return -1;
         }
         if (OBDCOMM_TIMEOUT < 1000000l * (curr.tv_sec - start.tv_sec) + (curr.tv_usec - start.tv_usec)) {
-            printf("%s: Timeout!\n", buf);
+            printf("Timeout!");
             return -1;
         }
     } while (retval == 0 || bufptr[-1] != '>');
 
+    for (int n = 0; n < retval; n++) {
+        if (buf[n] == 13) buf[n] = 32;
+        if (buf[n] == 10) buf[n] = 32;
+    }
     return retval;
-}
-
-void readtonextprompt(int fd) {
-    char retbuf[4096]; // Buffer to store returned stuff
-    readserialdata(fd, retbuf, sizeof (retbuf));
-    //printf("|\r%s\n|", retbuf);
 }
 
 void blindcmd(int fd, const char *cmd, int no_response) {
     char outstr[1024];
-    //printf("CMD: %s\n", cmd);
+
     snprintf(outstr, sizeof (outstr), "%s%s\0", cmd, OBDCMD_NEWLINE);
-    //appendseriallog(outstr, SERIAL_OUT);
+
     write(fd, outstr, strlen(outstr));
-    /*if (0 != no_response) {
-        sleep(1);
-        readtonextprompt(fd);
-    }*/
+
+    if (0 != no_response) {
+        usleep(300000);
+        char retbuf[4096]; // Buffer to store returned stuff
+        int a = readserialdata(fd, retbuf, sizeof (retbuf));
+
+        PRINTF("%s%c%iBytes%c|%s|\n", cmd, 9, a, 9, retbuf);
+    }
 }
 
 static long attempt_upgradebaudrate(int fd, long rate, long previousrate) {
@@ -716,7 +721,6 @@ static long attempt_upgradebaudrate(int fd, long rate, long previousrate) {
         }
     }
 
-    // printf("\nreadcount: %i: \"%s\"\n", readcount, elm_response);
     if (NULL != strstr(elm_response, "OK")) {
         // printf("got OK");
         if (-1 == modifybaud(fd, rate)) {
@@ -897,13 +901,15 @@ enum obd_serial_status getobdbytes(int fd, unsigned int mode, unsigned int cmd, 
             sendbuflen = snprintf(sendbuf, sizeof (sendbuf), "%02X%02X%01X" OBDCMD_NEWLINE, mode, cmd, numbytes_expected);
         }
     }
-    //printf("\nsendbuf: %s\n", sendbuf);
-    
+
     if (write(fd, sendbuf, sendbuflen) < sendbuflen) {
         return OBD_ERROR;
     }
 
     nbytes = readserialdata(fd, retbuf, sizeof (retbuf));
+
+    PRINTF("%s%c%iBytes%c|%s|\n", sendbuf, 9, nbytes, 9, retbuf);
+
     if (0 == nbytes) {
         if (!quiet)
             fprintf(stderr, "No data at all returned from serial port\n");
@@ -917,8 +923,8 @@ enum obd_serial_status getobdbytes(int fd, unsigned int mode, unsigned int cmd, 
     // First some sanity checks on the data
 
     if (NULL != strstr(retbuf, "NO DATA")) {
-        if (!quiet)
-            fprintf(stderr, "OBD reported NO DATA for %02X %02X: %s\n", mode, cmd, retbuf);
+        /*if (!quiet)
+            fprintf(stderr, "OBD reported NO DATA for %02X %02X: %s\n", mode, cmd, retbuf);*/
         return OBD_NO_DATA;
     }
 
@@ -1059,6 +1065,7 @@ int init_OBD(char *serial) {
     blindcmd(fd, "ATS0", 1);
 
     blindcmd(fd, "ATTP5", 1); // Lada Niva Euro4
+    //blindcmd(fd, "ATTP6", 1); // Toyota
 
     blindcmd(fd, "0100", 1);
 
