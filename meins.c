@@ -29,7 +29,7 @@
 
 #ifdef __RASPI__
 #include "esUtil_raspi.h"
-#define OBD_SERIAL "/dev/rfcomm0"
+#define OBD_SERIAL "/dev/rfcomm1"
 #define RSIZE 5
 #define HOME "/home/pi/"
 #else
@@ -44,7 +44,7 @@ FILE *sout;
 #define BUFFER_OFFSET(i) ((void *) NULL + (2*(i)))
 #define ROUND(x) roundf(x*10)/10
 //#define MEM(x) (int)(x * 256 )
-#define PRINTF(...) fprintf(sout,__VA_ARGS__);fprintf(stdout,__VA_ARGS__)
+#define PRINTF(...) fprintf(sout,__VA_ARGS__);fflush(sout);fprintf(stdout,__VA_ARGS__)
 #define PRINTGLERROR printOglError(__FILE__, __LINE__);
 #ifdef __TM__
 #define TM(START,END,...) clock_gettime(CLOCK_MONOTONIC, &END);printf("\r%lims\n",(END.tv_sec - START.tv_sec) * 1000 + (END.tv_nsec - START.tv_nsec) / 1000000);
@@ -1214,7 +1214,6 @@ void initPOS(ESContext * esContext) {
     eigenschaften = fopen(HOME "sit2d_pos", "rb+");
     if (eigenschaften == NULL)
         eigenschaften = fopen(HOME "sit2d_pos", "wb");
-
     if (fread(&posData->g_x, sizeof (double), 1, eigenschaften) == 1) {
         fread(&posData->g_y, sizeof (double), 1, eigenschaften);
         fread(&posData->gps_altitude, sizeof (double), 1, eigenschaften);
@@ -1222,7 +1221,7 @@ void initPOS(ESContext * esContext) {
         fread(&posData->gps_file, sizeof (uint16_t), 1, eigenschaften);
         posData->gps_file++;
     } else {
-        PRINTF("\rinitPOS: sit2d_pos leer.\n");
+        printf("\rinitPOS: sit2d_pos leer.\n");
         posData->gps_latitude = 52.1317029;
         posData->gps_longitude = 11.6530974;
         posData->gps_altitude = 0.0;
@@ -1246,7 +1245,7 @@ void initPOS(ESContext * esContext) {
 
     posData->osmS = 40075017 * cos(posData->gps_latitude * M_PI / 180.0) / pow(2.0, 18.0 + 8.0) * IMAGE_SIZE;
 
-    PRINTF("\rinitPOS: g: %f %f a: %f\n", posData->g_x, posData->g_y, posData->angle);
+    printf("\rinitPOS: g: %f %f a: %f\n", posData->g_x, posData->g_y, posData->angle);
 }
 
 void * foss(void *esContext) {
@@ -1651,9 +1650,8 @@ double getDegrees(double lat1, double lon1, double lat2, double lon2) {
     return atan2(sin(lam2 - lam1) * cos(phi2), cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(lam2 - lam1)) * 180 / M_PI;
 }
 
-#ifdef __OBD__
-
 void * lenovo(void *esContext) {
+#ifdef __OBD__
     POS_T *posData = ((ESContext*) esContext)->posData;
 
     sleep(5);
@@ -1685,45 +1683,51 @@ void * lenovo(void *esContext) {
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_speed = tmp_val;
             } else {
-                printf("OBD: fehler: \n");
+                PRINTF("OBD: fehler: \n");
             }
 
             obdstatus = getobdvalue(obd_serial, 0x05, &tmp_val, obdcmds_mode1[0x05].bytes_returned, obdcmds_mode1[0x05].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_coolant = tmp_val;
             } else {
-                printf("OBD: fehler: \n");
+                PRINTF("OBD: fehler: \n");
             }
             obdstatus = getobdvalue(obd_serial, 0x10, &tmp_val, obdcmds_mode1[0x10].bytes_returned, obdcmds_mode1[0x10].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_maf = tmp_val;
             } else {
-                printf("OBD: fehler: \n");
+                PRINTF("OBD: fehler: \n");
             }
             obdstatus = getobdvalue(obd_serial, 0x0F, &tmp_val, obdcmds_mode1[0x0F].bytes_returned, obdcmds_mode1[0x0F].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_iat = tmp_val;
             } else {
-                printf("OBD: fehler: \n");
+                PRINTF("OBD: fehler: \n");
             }
             obdstatus = getobdvalue(obd_serial, 0x14, &tmp_val, obdcmds_mode1[0x14].bytes_returned, obdcmds_mode1[0x14].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_o21 = tmp_val;
             } else {
-                printf("OBD: fehler: \n");
+                PRINTF("OBD: fehler: \n");
             }
             obdstatus = getobdvalue(obd_serial, 0x15, &tmp_val, obdcmds_mode1[0x15].bytes_returned, obdcmds_mode1[0x15].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_o22 = tmp_val;
             } else {
-                printf("OBD: fehler: \n");
+                PRINTF("OBD: fehler: \n");
             }
+            /*obdstatus = getobdvalue(obd_serial, 0x15, &tmp_val, obdcmds_mode1[0x15].bytes_returned, obdcmds_mode1[0x15].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_o22 = tmp_val;
+            } else {
+                PRINTF("OBD: fehler: \n");
+            }*/
         } else {
             obd_serial = init_OBD(OBD_SERIAL);
         }
     }
-}
 #endif
+}
 
 void * pinto(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
@@ -1737,18 +1741,6 @@ void * pinto(void *esContext) {
     struct timeval t1, t2, t_start;
     int lk = 0, status;
     double g_x, g_y, old_lat, old_lon, old_g_x, old_g_y, dist;
-
-#ifdef __OBD__1
-    // für obd_volt
-    char outstr[1024];
-    char retbuf[4096];
-    int nbytes;
-    //     
-
-    int obd_serial = -1;
-    enum obd_serial_status obdstatus;
-    float tmp_val;
-#endif
 
     int gpsd_init = -1;
     //struct GPS_T gpsData;
@@ -1784,57 +1776,6 @@ void * pinto(void *esContext) {
         //elapsed = (t2.tv_sec - t_start.tv_sec)*1000 + (t2.tv_usec - t_start.tv_usec) / 1000;
         t1 = t2;
 
-#ifdef __OBD__1
-        if (obd_serial != -1) {
-            snprintf(outstr, sizeof (outstr), "%s%s\0", "ATRV", "\r");
-            write(obd_serial, outstr, strlen(outstr));
-
-            nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
-            printf("ATRV%c%iBytes%c|%s|\n", 9, nbytes, 9, retbuf);
-            retbuf[4] = '\0';
-            sscanf(retbuf, "%f", &posData->obd_volt);
-
-            obdstatus = getobdvalue(obd_serial, 0x0D, &tmp_val, obdcmds_mode1[0x0D].bytes_returned, obdcmds_mode1[0x0D].conv);
-            if (OBD_SUCCESS == obdstatus) {
-                posData->obd_speed = tmp_val;
-            } else {
-                printf("OBD: fehler: \n");
-            }
-
-            obdstatus = getobdvalue(obd_serial, 0x05, &tmp_val, obdcmds_mode1[0x05].bytes_returned, obdcmds_mode1[0x05].conv);
-            if (OBD_SUCCESS == obdstatus) {
-                posData->obd_coolant = tmp_val;
-            } else {
-                printf("OBD: fehler: \n");
-            }
-            obdstatus = getobdvalue(obd_serial, 0x10, &tmp_val, obdcmds_mode1[0x10].bytes_returned, obdcmds_mode1[0x10].conv);
-            if (OBD_SUCCESS == obdstatus) {
-                posData->obd_maf = tmp_val;
-            } else {
-                printf("OBD: fehler: \n");
-            }
-            obdstatus = getobdvalue(obd_serial, 0x0F, &tmp_val, obdcmds_mode1[0x0F].bytes_returned, obdcmds_mode1[0x0F].conv);
-            if (OBD_SUCCESS == obdstatus) {
-                posData->obd_iat = tmp_val;
-            } else {
-                printf("OBD: fehler: \n");
-            }
-            obdstatus = getobdvalue(obd_serial, 0x14, &tmp_val, obdcmds_mode1[0x14].bytes_returned, obdcmds_mode1[0x14].conv);
-            if (OBD_SUCCESS == obdstatus) {
-                posData->obd_o21 = tmp_val;
-            } else {
-                printf("OBD: fehler: \n");
-            }
-            obdstatus = getobdvalue(obd_serial, 0x15, &tmp_val, obdcmds_mode1[0x15].bytes_returned, obdcmds_mode1[0x15].conv);
-            if (OBD_SUCCESS == obdstatus) {
-                posData->obd_o22 = tmp_val;
-            } else {
-                printf("OBD: fehler: \n");
-            }
-        } else {
-            obd_serial = init_OBD(OBD_SERIAL);
-        }
-#endif
 #ifdef __SENSOR_HUM__
         if (i2c_init != -1) {
             i2c_status = sensor_hum_read(&i2c_init, &i2c_hum, &i2c_temp);
@@ -2161,6 +2102,8 @@ int main(int argc, char *argv[]) {
     memset(&posData, 0, sizeof (POS_T));
     memset(&gpsData, 0, sizeof (GPS_T));
 
+    char filename[100], buffer[80];
+
     pthread_t thread_id1, thread_id2, thread_id3, thread_id4, thread_id5;
     pthread_mutex_init(&m_pinto, NULL);
     pthread_mutex_init(&mutex_deto_lvl2, NULL);
@@ -2170,13 +2113,16 @@ int main(int argc, char *argv[]) {
     //signal(SIGINT, ShutDown);
     setvbuf(stdout, (char *) NULL, _IONBF, 0);
 
+    sprintf(filename, "%s/sit2d.debug", HOME);
+    sout = fopen(filename, "wb");
+    assert(sout != NULL);
+
     userData.width = 800;
     userData.height = 480;
 
 #ifdef __RASPI__
     //bl_write(BL_ON);
 #endif
-    char filename[100], buffer[80];
 
     esInitContext(&esContext);
     esContext.userData = &userData;
@@ -2196,10 +2142,6 @@ int main(int argc, char *argv[]) {
         sprintf(filename, "%s/sit2d_%i.gps", HOME, posData.gps_file);
         gps_out = fopen(filename, "wb");
         assert(gps_out != NULL);
-
-        sprintf(filename, "%s/sit2d_%i.debug", HOME, posData.gps_file);
-        sout = fopen(filename, "wb");
-        assert(sout != NULL);
     }
 
     esCreateWindow(&esContext, "SiT2D", userData.width, userData.height, ES_WINDOW_RGB);

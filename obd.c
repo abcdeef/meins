@@ -1027,10 +1027,10 @@ int init_OBD(char *serial) {
     int fd = open(serial, O_RDWR | O_NOCTTY | O_NDELAY);
 
     if (fd == -1) {
-        printf("\serial-dev: %s nicht gefunden\n", serial);
+        PRINTF("\serial-dev: %s nicht gefunden\n", serial);
         return -1;
     } else {
-        printf("\rserial-dev: %s geöffnet\n", serial);
+        PRINTF("\rserial-dev: %s geöffnet\n", serial);
     }
     tcgetattr(fd, &options);
 
