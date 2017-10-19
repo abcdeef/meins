@@ -679,7 +679,7 @@ void blindcmd(int fd, const char *cmd, int no_response) {
         char retbuf[4096]; // Buffer to store returned stuff
         int a = readserialdata(fd, retbuf, sizeof (retbuf));
 
-        PRINTF("%s%c%iBytes%c|%s|\n", cmd, 9, a, 9, retbuf);
+        //PRINTF("%s%c%iBytes%c|%s|\n", cmd, 9, a, 9, retbuf);
     }
 }
 
@@ -908,7 +908,7 @@ enum obd_serial_status getobdbytes(int fd, unsigned int mode, unsigned int cmd, 
 
     nbytes = readserialdata(fd, retbuf, sizeof (retbuf));
 
-    PRINTF("%s%c%iBytes%c|%s|\n", sendbuf, 9, nbytes, 9, retbuf);
+    //PRINTF("%s%c%iBytes%c|%s|\n", sendbuf, 9, nbytes, 9, retbuf);
 
     if (0 == nbytes) {
         if (!quiet)
@@ -1021,7 +1021,8 @@ enum obd_serial_status getobdvalue(int fd, unsigned int cmd, float *ret, int num
 int init_OBD(char *serial) {
     struct termios options;
 
-    long baudrate = 9600; // 0 - AUTO
+    //long baudrate = 9600; // 0 - AUTO
+    long baudrate = 115200;
     long baudrate_target = -1;
 
     int fd = open(serial, O_RDWR | O_NOCTTY | O_NDELAY);
@@ -1069,5 +1070,8 @@ int init_OBD(char *serial) {
 
     blindcmd(fd, "0100", 1);
 
+    // optional
+    //blindcmd(fd, "ATAMC", 1);
+    
     return fd;
 }

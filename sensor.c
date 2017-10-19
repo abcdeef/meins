@@ -151,8 +151,8 @@ enum e_i2c_status sensor_hum_read(int *file, float *humidity, float *cTemp) {
     *humidity = ((1.0 * H1) - (1.0 * H0)) * (1.0 * hum - 1.0 * H2) / (1.0 * H3 - 1.0 * H2) + (1.0 * H0);
     *cTemp = ((T1 - T0) / 8.0) * (temp - T2) / (T3 - T2) + (T0 / 8.0);
 
-    printf("\rRelative humidity : %.2f RH \n", *humidity);
-    printf("\rTemperature in Celsius : %.2f C \n", *cTemp);
+    //printf("\rRelative humidity : %.2f RH \n", *humidity);
+    //printf("\rTemperature in Celsius : %.2f C \n", *cTemp);
 
     return I2C_SUCCESS;
 }

@@ -29,7 +29,8 @@
 
 #ifdef __RASPI__
 #include "esUtil_raspi.h"
-#define OBD_SERIAL "/dev/rfcomm1"
+//#define OBD_SERIAL "/dev/rfcomm1"
+#define OBD_SERIAL "/dev/ttyUSB0"
 #define RSIZE 5
 #define HOME "/home/pi/"
 #else
@@ -1253,7 +1254,7 @@ void * foss(void *esContext) {
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     struct timespec spec0, spec1, asd;
-    uint8_t display = 0;
+    uint8_t display = 3;
 
     PRINTF("\rFOSS gestartet\n");
 
@@ -1295,7 +1296,7 @@ void * foss(void *esContext) {
         gpio_get_button(&button);
         if ((button & (1 << 18)) >> 18 == 0 && (button_old & (1 << 18)) >> 18 == 1) {
             display++;
-            display %= 4;
+            display %= 5;
             gpio_button_led(5, 1);
             memset(&d_f[0], 128, sizeof (d_f));
             gpio_set_lcd_maske(display);
@@ -1405,6 +1406,24 @@ void * foss(void *esContext) {
                 d_f[0] = 0;
             }
         } else if (display == 3) {
+            snprintf(wert1, 6, "%4.1f", posData->i2c_hum);
+            snprintf(wert2, 6, "%4.1f", posData->i2c_temp);
+
+            d_f[0] += f;
+            if (d_f[0] > 2000) {
+                gpio_lcd_send_byte(LCD_LINE_1 + 4, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 4; a++) {
+                    gpio_lcd_send_byte(wert1[a], GPIO_HIGH);
+                }
+                gpio_lcd_send_byte(LCD_LINE_1 + 16, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 2; a++) {
+                    gpio_lcd_send_byte(wert2[a], GPIO_HIGH);
+                }
+
+                d_f[0] = 0;
+            }
+
+        } else if (display == 4) {
             gpio_button_led(5, 0);
 
         }
@@ -1650,13 +1669,27 @@ double getDegrees(double lat1, double lon1, double lat2, double lon2) {
     return atan2(sin(lam2 - lam1) * cos(phi2), cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(lam2 - lam1)) * 180 / M_PI;
 }
 
-void * lenovo(void *esContext) {
-#ifdef __OBD__
+void * pinto(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
 
-    sleep(5);
-    PRINTF("\rLENOVO gestartet\n");
+    PRINTF("\rPINTO gestartet\n");
 
+    int counter = 0;
+
+    float speed = 0.0f, old_speed = 0.0f, deltatime = 0.0f;
+    float deg, old_deg;
+    struct timeval t1, t2, t_start;
+    int lk = 0, status;
+    double g_x, g_y, old_lat, old_lon, old_g_x, old_g_y, dist;
+
+    int gpsd_init = -1;
+    //struct GPS_T gpsData;
+    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
+
+    int i2c_init = -1;
+    enum e_i2c_status i2c_status;
+
+#ifdef __OBD__    
     // für obd_volt
     char outstr[1024];
     char retbuf[4096];
@@ -1666,16 +1699,42 @@ void * lenovo(void *esContext) {
     int obd_serial = -1;
     enum obd_serial_status obdstatus;
     float tmp_val;
+#endif
+
+#ifdef __I2C__
+    short i2c_x, i2c_y, i2c_z;
+#endif
+#ifdef __SENSOR_HUM__
+    float i2c_hum, i2c_temp;
+#endif
+    gettimeofday(&t_start, NULL);
+    t1 = t_start;
 
     while (1) {
-        usleep(5000000);
+        usleep(2000000);
 
+        old_lat = posData->gps_latitude;
+        old_lon = posData->gps_longitude;
+
+        old_g_x = g_x;
+        old_g_y = g_y;
+
+        old_speed = speed;
+        old_deg = deg;
+
+        gettimeofday(&t2, NULL);
+        deltatime = (float) (t2.tv_sec - t1.tv_sec + (t2.tv_usec - t1.tv_usec) * 1e-6) * 1000;
+
+        //elapsed = (t2.tv_sec - t_start.tv_sec)*1000 + (t2.tv_usec - t_start.tv_usec) / 1000;
+        t1 = t2;
+
+#ifdef __OBD__     
         if (obd_serial != -1) {
             snprintf(outstr, sizeof (outstr), "%s%s\0", "ATRV", "\r");
             write(obd_serial, outstr, strlen(outstr));
 
             nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
-            PRINTF("ATRV%c%iBytes%c|%s|\n", 9, nbytes, 9, retbuf);
+            //PRINTF("ATRV%c%iBytes%c|%s|\n", 9, nbytes, 9, retbuf);
             retbuf[4] = '\0';
             sscanf(retbuf, "%f", &posData->obd_volt);
 
@@ -1725,57 +1784,7 @@ void * lenovo(void *esContext) {
         } else {
             obd_serial = init_OBD(OBD_SERIAL);
         }
-    }
 #endif
-}
-
-void * pinto(void *esContext) {
-    POS_T *posData = ((ESContext*) esContext)->posData;
-
-    PRINTF("\rPINTO gestartet\n");
-
-    int counter = 0;
-
-    float speed = 0.0f, old_speed = 0.0f, deltatime = 0.0f;
-    float deg, old_deg;
-    struct timeval t1, t2, t_start;
-    int lk = 0, status;
-    double g_x, g_y, old_lat, old_lon, old_g_x, old_g_y, dist;
-
-    int gpsd_init = -1;
-    //struct GPS_T gpsData;
-    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
-
-    int i2c_init = -1;
-    enum e_i2c_status i2c_status;
-
-#ifdef __I2C__
-    short i2c_x, i2c_y, i2c_z;
-#endif
-#ifdef __SENSOR_HUM__
-    float i2c_hum, i2c_temp;
-#endif
-    gettimeofday(&t_start, NULL);
-    t1 = t_start;
-
-    while (1) {
-        usleep(2000000);
-
-        old_lat = posData->gps_latitude;
-        old_lon = posData->gps_longitude;
-
-        old_g_x = g_x;
-        old_g_y = g_y;
-
-        old_speed = speed;
-        old_deg = deg;
-
-        gettimeofday(&t2, NULL);
-        deltatime = (float) (t2.tv_sec - t1.tv_sec + (t2.tv_usec - t1.tv_usec) * 1e-6) * 1000;
-
-        //elapsed = (t2.tv_sec - t_start.tv_sec)*1000 + (t2.tv_usec - t_start.tv_usec) / 1000;
-        t1 = t2;
-
 #ifdef __SENSOR_HUM__
         if (i2c_init != -1) {
             i2c_status = sensor_hum_read(&i2c_init, &i2c_hum, &i2c_temp);
@@ -1812,7 +1821,7 @@ void * pinto(void *esContext) {
                 g_x = (gpsData->longitude + 180.0) / 360.0 * pow2Z;
                 g_y = (1.0 - log(tan(gpsData->latitude * rad2deg) + 1.0 / cos(gpsData->latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
                 deg = gpsData->angle;
-#ifdef __OBD__1
+#ifdef __OBD__OLD
                 if (obd_serial == -1) {
                     dist = sqrt(pow(old_g_x - g_x, 2) + pow(old_g_y - g_y, 2)) * posData->osmS;
                     speed = dist / deltatime * 3600.0f;
@@ -2176,7 +2185,7 @@ int main(int argc, char *argv[]) {
     esRegisterKeyFunc(&esContext, Key);
 #endif
 
-    pthread_create(&thread_id1, NULL, &lenovo, (void*) &esContext);
+    //pthread_create(&thread_id1, NULL, &lenovo, (void*) &esContext);
     pthread_create(&thread_id2, NULL, &pinto, (void*) &esContext);
     //pthread_create(&thread_id3, NULL, &jolla, (void*) &esContext);
     //pthread_create(&thread_id4, NULL, &deta_lvl2, (void*) &esContext);

@@ -208,6 +208,15 @@ void gpio_set_lcd_maske(uint_fast8_t display) {
         gpio_lcd_send_byte(':', GPIO_HIGH);
 
     } else if (display == 3) {
+        gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+        gpio_lcd_send_byte('R', GPIO_HIGH);
+        gpio_lcd_send_byte('H', GPIO_HIGH);
+        gpio_lcd_send_byte(':', GPIO_HIGH);
+
+        gpio_lcd_send_byte(LCD_LINE_1 + 13, GPIO_LOW);
+        gpio_lcd_send_byte('T', GPIO_HIGH);
+        gpio_lcd_send_byte(':', GPIO_HIGH);
+    } else if (display == 4) {
         gpio_lcd_send_byte(0x08, GPIO_LOW);
     }
 }
