@@ -77,6 +77,8 @@ void gpio_init() {
     gpio = (volatile unsigned *) gpio_map;
 }
 
+#ifdef __RASPI__
+
 void gpio_lcd_send_byte(char bits, char *mode) {
     if (*mode == 48)
         GPIO_CLR = 1 << LCD_BUS[GPIO_RS];
@@ -116,6 +118,34 @@ void gpio_lcd_send_byte(char bits, char *mode) {
     GPIO_CLR = 1 << LCD_BUS[GPIO_E];
     delay(E_DELAY);
 }
+#else
+char oled_line1[20], oled_line2[20];
+int oled_cursor = 0;
+
+void gpio_lcd_send_byte(char bits, char *mode) {
+
+    if (*mode == 0) {
+        oled_cursor = bits;
+    } else {
+        if (oled_cursor >= LCD_LINE_2) {
+            oled_line2[oled_cursor - LCD_LINE_2] = bits;
+        } else {
+            oled_line1[oled_cursor - LCD_LINE_1] = bits;
+        }
+
+        printf("\r|");
+        for (int a = 0; a < 20; a++) {
+            printf("%c", oled_line1[a]);
+        }
+        printf("|    |");
+        for (int a = 0; a < 20; a++) {
+            printf("%c", oled_line2[a]);
+        }
+        printf("|");
+    }
+
+}
+#endif
 
 void gpio_lcd_init() {
     gpio_init();
@@ -142,6 +172,8 @@ void gpio_lcd_init() {
     gpio_lcd_send_byte(0x0C, GPIO_LOW); // Display on
 }
 
+#ifdef __RASPI__
+
 void gpio_get_button(unsigned int *button) {
     *button = GET_GPIO(18);
 }
@@ -149,13 +181,23 @@ void gpio_get_button(unsigned int *button) {
 void gpio_button_led(uint_fast8_t port, uint_fast8_t mode) {
     GPIO_SET = mode << port;
 }
+#else
+
+void gpio_get_button(unsigned int *button) {
+    //*button = GET_GPIO(18);
+}
+
+void gpio_button_led(uint_fast8_t port, uint_fast8_t mode) {
+    //GPIO_SET = mode << port;
+}
+#endif
 
 void gpio_set_lcd_maske(uint_fast8_t display) {
     gpio_lcd_send_byte(0x01, GPIO_LOW); // Clear display
     gpio_lcd_send_byte(0x0C, GPIO_LOW); // Display on
     if (display == 0) {
-        gpio_lcd_send_byte(LCD_LINE_1 + 14, GPIO_LOW);
-        gpio_lcd_send_byte('C', GPIO_HIGH);
+        gpio_lcd_send_byte(LCD_LINE_1 + 15, GPIO_LOW);
+        gpio_lcd_send_byte('T', GPIO_HIGH);
         gpio_lcd_send_byte(':', GPIO_HIGH);
 
         gpio_lcd_send_byte(LCD_LINE_2, GPIO_LOW);
@@ -165,9 +207,12 @@ void gpio_set_lcd_maske(uint_fast8_t display) {
         gpio_lcd_send_byte(LCD_LINE_2 + 7, GPIO_LOW);
         gpio_lcd_send_byte('V', GPIO_HIGH);
 
-        gpio_lcd_send_byte(LCD_LINE_2 + 14, GPIO_LOW);
-        gpio_lcd_send_byte('V', GPIO_HIGH);
+        gpio_lcd_send_byte(LCD_LINE_2 + 11, GPIO_LOW);
+        gpio_lcd_send_byte('R', GPIO_HIGH);
+        gpio_lcd_send_byte('H', GPIO_HIGH);
         gpio_lcd_send_byte(':', GPIO_HIGH);
+        gpio_lcd_send_byte(LCD_LINE_2 + 19, GPIO_LOW);
+        gpio_lcd_send_byte('%', GPIO_HIGH);
     } else if (display == 1) {
         gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
         gpio_lcd_send_byte('O', GPIO_HIGH);
@@ -208,14 +253,14 @@ void gpio_set_lcd_maske(uint_fast8_t display) {
         gpio_lcd_send_byte(':', GPIO_HIGH);
 
     } else if (display == 3) {
-        gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+        /*gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
         gpio_lcd_send_byte('R', GPIO_HIGH);
         gpio_lcd_send_byte('H', GPIO_HIGH);
         gpio_lcd_send_byte(':', GPIO_HIGH);
 
         gpio_lcd_send_byte(LCD_LINE_1 + 13, GPIO_LOW);
         gpio_lcd_send_byte('T', GPIO_HIGH);
-        gpio_lcd_send_byte(':', GPIO_HIGH);
+        gpio_lcd_send_byte(':', GPIO_HIGH);*/
     } else if (display == 4) {
         gpio_lcd_send_byte(0x08, GPIO_LOW);
     }

@@ -679,7 +679,7 @@ void blindcmd(int fd, const char *cmd, int no_response) {
         char retbuf[4096]; // Buffer to store returned stuff
         int a = readserialdata(fd, retbuf, sizeof (retbuf));
 
-        //PRINTF("%s%c%iBytes%c|%s|\n", cmd, 9, a, 9, retbuf);
+        PRINTF("%s%c%iBytes%c|%s|\n", cmd, 9, a, 9, retbuf);
     }
 }
 
@@ -1023,12 +1023,12 @@ int init_OBD(char *serial) {
 
     //long baudrate = 9600; // 0 - AUTO
     long baudrate = 115200;
-    long baudrate_target = -1;
-
+    long baudrate_target = -1;   
+    
     int fd = open(serial, O_RDWR | O_NOCTTY | O_NDELAY);
 
     if (fd == -1) {
-        PRINTF("\serial-dev: %s nicht gefunden\n", serial);
+        PRINTF("\rserial-dev: %s nicht gefunden\n", serial);
         return -1;
     } else {
         PRINTF("\rserial-dev: %s geöffnet\n", serial);
@@ -1048,15 +1048,17 @@ int init_OBD(char *serial) {
         close(fd);
         return -1;
     }
-
+    // Set all to defaults
+    blindcmd(fd, "ATD", 1);
     // Reset the device.
     blindcmd(fd, "ATZ", 1);
 
+    /*
     if (0 > upgradebaudrate(fd, baudrate_target, baudrate)) {
         fprintf(stderr, "Error upgrading baudrate. Continuing, but may suffer issues\n");
-    }
+    }*/
 
-    blindcmd(fd, "0100", 1);
+    //blindcmd(fd, "0100", 1);
 
     // Disable command echo [elm327]
     blindcmd(fd, "ATE0", 1);
@@ -1064,8 +1066,11 @@ int init_OBD(char *serial) {
     blindcmd(fd, "ATL0", 1);
     // Don't insert spaces [readability is for ugly bags of mostly water]
     blindcmd(fd, "ATS0", 1);
-
-    blindcmd(fd, "ATTP5", 1); // Lada Niva Euro4
+    // Headers off
+    blindcmd(fd, "ATH0", 1);
+    // 
+    blindcmd(fd, "ATSP5", 1);
+    //blindcmd(fd, "ATTP5", 1); // Lada Niva Euro4
     //blindcmd(fd, "ATTP6", 1); // Toyota
 
     blindcmd(fd, "0100", 1);

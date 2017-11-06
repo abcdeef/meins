@@ -645,7 +645,7 @@ void nmea(char *line, GPS_T *data) {
         {
             struct minmea_sentence_rmc frame;
             if (minmea_parse_rmc(&frame, line)) {
-                //char buffer[80];
+                char buffer[80];
                 struct tm tmp;
 
                 tmp.tm_year = frame.date.year + 100;
@@ -662,6 +662,8 @@ void nmea(char *line, GPS_T *data) {
 
                 if (abs(data->stamp - time(NULL)) > 60) {
                     stime(&data->stamp);
+                    strftime(buffer, 80, "%d.%m.%Y %H:%M", localtime(&data->stamp));
+                    printf("%s\n", buffer);
                 }
 #endif
                 /*
