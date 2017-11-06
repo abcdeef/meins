@@ -1770,6 +1770,12 @@ void * pinto(void *esContext) {
         {&tv_tmp.tv_sec, sizeof (tv_tmp.tv_sec)},
         {&tv_tmp.tv_usec, sizeof (tv_tmp.tv_usec)}
     };
+    printf("io_gps:");
+    for (int a = 0; a<sizeof (io_gps) / sizeof (T_IO); a++) {
+        printf(" %zu", io_gps[a].len);
+    }
+    printf("\n");
+
 
     while (1) {
         usleep(2000000);
