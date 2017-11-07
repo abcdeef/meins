@@ -1756,9 +1756,12 @@ void * pinto(void *esContext) {
     gettimeofday(&t_start, NULL);
     t1 = t_start;
 
+
+    int32_t stamp, tv_sec, tv_usec;
+
     T_IO io_gps[] = {
         {&deltatime, sizeof (float)},
-        {&gpsData->stamp, sizeof (gpsData->stamp)},
+        {&stamp, sizeof (stamp)},
         {&gpsData->fix_quality, sizeof (gpsData->fix_quality)},
         {&g_x, sizeof (double)},
         {&g_y, sizeof (double)},
@@ -1767,8 +1770,8 @@ void * pinto(void *esContext) {
         {&posData->obd_speed, sizeof (float)},
         {&posData->obd_volt, sizeof (posData->obd_volt)},
         {&deg, sizeof (float)},
-        {&tv_tmp.tv_sec, sizeof (tv_tmp.tv_sec)},
-        {&tv_tmp.tv_usec, sizeof (tv_tmp.tv_usec)}
+        {&tv_sec, sizeof (tv_sec)},
+        {&tv_usec, sizeof (tv_usec)}
     };
     printf("io_gps:");
     for (int a = 0; a<sizeof (io_gps) / sizeof (T_IO); a++) {
@@ -1931,6 +1934,9 @@ void * pinto(void *esContext) {
             for (int a = 0; a<sizeof (io_gps) / sizeof (T_IO); a++) {
                 fread(io_gps[a].val, io_gps[a].len, 1, gps_in);
             }
+            gpsData->stamp = stamp;
+            tv_tmp.tv_sec = tv_sec;
+            tv_tmp.tv_usec = tv_usec;
             PRINTF("\rgps_out %i: %i,%i: %f %f %f %f %f %f \n", counter, tv_tmp.tv_sec, tv_tmp.tv_usec, deltatime, g_x, g_y, dist, speed, deg);
             counter++;
 
@@ -1948,6 +1954,9 @@ void * pinto(void *esContext) {
             tv_tmp.tv_sec = t2.tv_sec;
             tv_tmp.tv_usec = t2.tv_usec;
 
+            stamp = gpsData->stamp;
+            tv_sec = tv_tmp.tv_sec;
+            tv_usec = tv_tmp.tv_usec;
             for (int a = 0; a<sizeof (io_gps) / sizeof (T_IO); a++) {
                 fwrite(io_gps[a].val, io_gps[a].len, 1, gps_out);
             }
