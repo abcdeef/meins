@@ -195,6 +195,7 @@ void gpio_button_led(uint_fast8_t port, uint_fast8_t mode) {
 void gpio_set_lcd_maske(uint_fast8_t display) {
     gpio_lcd_send_byte(0x01, GPIO_LOW); // Clear display
     gpio_lcd_send_byte(0x0C, GPIO_LOW); // Display on
+
     if (display == 0) {
         gpio_lcd_send_byte(LCD_LINE_1 + 15, GPIO_LOW);
         gpio_lcd_send_byte('T', GPIO_HIGH);
@@ -227,6 +228,12 @@ void gpio_set_lcd_maske(uint_fast8_t display) {
         gpio_lcd_send_byte('I', GPIO_HIGH);
         gpio_lcd_send_byte(':', GPIO_HIGH);
 
+        gpio_lcd_send_byte(LCD_LINE_2, GPIO_LOW);
+        gpio_lcd_send_byte('T', GPIO_HIGH);
+        gpio_lcd_send_byte('i', GPIO_HIGH);
+        gpio_lcd_send_byte('A', GPIO_HIGH);
+        gpio_lcd_send_byte(':', GPIO_HIGH);
+
         gpio_lcd_send_byte(LCD_LINE_2 + 12, GPIO_LOW);
         gpio_lcd_send_byte('M', GPIO_HIGH);
         gpio_lcd_send_byte('A', GPIO_HIGH);
@@ -253,14 +260,13 @@ void gpio_set_lcd_maske(uint_fast8_t display) {
         gpio_lcd_send_byte(':', GPIO_HIGH);
 
     } else if (display == 3) {
-        /*gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
-        gpio_lcd_send_byte('R', GPIO_HIGH);
-        gpio_lcd_send_byte('H', GPIO_HIGH);
+        gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+        gpio_lcd_send_byte('N', GPIO_HIGH);
         gpio_lcd_send_byte(':', GPIO_HIGH);
 
-        gpio_lcd_send_byte(LCD_LINE_1 + 13, GPIO_LOW);
-        gpio_lcd_send_byte('T', GPIO_HIGH);
-        gpio_lcd_send_byte(':', GPIO_HIGH);*/
+        /*        gpio_lcd_send_byte(LCD_LINE_1 + 13, GPIO_LOW);
+                gpio_lcd_send_byte('T', GPIO_HIGH);
+                gpio_lcd_send_byte(':', GPIO_HIGH);*/
     } else if (display == 4) {
         gpio_lcd_send_byte(0x08, GPIO_LOW);
     }

@@ -174,17 +174,21 @@ enum e_i2c_status sensor_hum_init(int * file) {
     return I2C_SUCCESS;
 }
 
-enum e_i2c_status senseHat_read(int *file, float *humidity, float *cTemp) {
-    char buf[5];
+enum e_i2c_status senseHat_read(int *file, float *humidity, float *cTemp, float *cAngle) {
+    char buf[25];
     buf[4] = '\0';
 
     write(*file, "R", 1);
-    read(*file, buf, 4);
+    read(*file, buf, 5);
     *humidity = atof(buf);
 
     write(*file, "T", 1);
-    read(*file, buf, 4);
+    read(*file, buf, 5);
     *cTemp = atof(buf);
+
+    write(*file, "N", 1);
+    read(*file, buf, 5);
+    *cAngle = atof(buf);
 }
 
 enum e_i2c_status sensor_hum_read(int *file, float *humidity, float *cTemp) {

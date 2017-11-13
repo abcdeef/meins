@@ -288,9 +288,11 @@ typedef struct {
     float obd_o21;
     float obd_o22;
     float obd_iat;
+    float obd_tia;
 
     float i2c_hum;
     float i2c_temp;
+    float i2c_angle;
 
     // Festkomma g_x/g_y Ersatz
     int gi_x[2];
@@ -1214,18 +1216,7 @@ int cmpfunc_id(const void * a, const void * b) {
     return (((T_V_E*) a)->id - ((T_V_E*) b)->id);
 }
 
-T_IO io_eigenschaften[5]; /* = {
-    {&deltatime, sizeof (float)},
-    {&gpsData->stamp, sizeof (gpsData->stamp)},
-    {&gpsData->fix_quality, sizeof (gpsData->fix_quality)},
-    {&g_x, sizeof (double)},
-    {&g_y, sizeof (double)},
-    {&dist, sizeof (double)},
-    {&posData->obd_speed, sizeof (float)},
-    {&deg, sizeof (float)},
-    {&tv_tmp.tv_sec, sizeof (tv_tmp.tv_sec)},
-    {&tv_tmp.tv_usec, sizeof (tv_tmp.tv_usec)}
-};*/
+T_IO io_eigenschaften[5];
 
 void initPOS(ESContext * esContext) {
     POS_T *posData = esContext->posData;
@@ -1288,7 +1279,7 @@ void * foss(void *esContext) {
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     struct timespec spec0, spec1, asd;
-    uint_fast8_t display = 0;
+    uint_fast8_t display = 1;
 
     PRINTF("\rFOSS gestartet\n");
 
@@ -1322,6 +1313,7 @@ void * foss(void *esContext) {
     uint_fast8_t old_rpm = 0;
 
     clock_gettime(CLOCK_MONOTONIC, &spec0);
+
     while (1) {
         clock_gettime(CLOCK_MONOTONIC, &spec1);
         f = (spec1.tv_sec - spec0.tv_sec) * 1000 + (spec1.tv_nsec - spec0.tv_nsec) / 1000000;
@@ -1331,7 +1323,7 @@ void * foss(void *esContext) {
         gpio_get_button(&button);
         if ((button & (1 << 18)) >> 18 == 0 && (button_old & (1 << 18)) >> 18 == 1) {
             display++;
-            display %= 5;
+            display %= 4;
             gpio_button_led(5, 1);
             memset(&d_f[0], 128, sizeof (d_f));
             gpio_set_lcd_maske(display);
@@ -1389,6 +1381,7 @@ void * foss(void *esContext) {
 
             snprintf(wert1, 8, "%1.1f/%1.1f", posData->obd_o21, posData->obd_o22);
             snprintf(wert2, 7, "%2.0f", posData->obd_iat);
+            snprintf(wert3, 7, "%5.1f", posData->obd_tia);
             snprintf(wert4, 7, "%4.1f", posData->obd_maf);
 
             d_f[0] += f;
@@ -1400,6 +1393,10 @@ void * foss(void *esContext) {
                 gpio_lcd_send_byte(LCD_LINE_1 + 18, GPIO_LOW);
                 for (uint_fast8_t a = 0; a < 2; a++) {
                     gpio_lcd_send_byte(wert2[a], GPIO_HIGH);
+                }
+                gpio_lcd_send_byte(LCD_LINE_2 + 5, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 5; a++) {
+                    gpio_lcd_send_byte(wert3[a], GPIO_HIGH);
                 }
                 gpio_lcd_send_byte(LCD_LINE_2 + 16, GPIO_LOW);
                 for (uint_fast8_t a = 0; a < 4; a++) {
@@ -1440,6 +1437,17 @@ void * foss(void *esContext) {
                 d_f[0] = 0;
             }
         } else if (display == 3) {
+            snprintf(wert1, 6, "%4.1f", posData->i2c_angle);
+
+            d_f[0] += f;
+            if (d_f[0] > 1000) {
+                gpio_lcd_send_byte(LCD_LINE_1 + 2, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 6; a++) {
+                    gpio_lcd_send_byte(wert1[a], GPIO_HIGH);
+                }
+                d_f[0] = 0;
+            }
+
             /*char s_rpm[20];
 
             uint_fast8_t rpm = (uint_fast8_t) (posData->obd_rpm / 5000.0f * 20.0f) - 1;
@@ -1472,7 +1480,7 @@ void * foss(void *esContext) {
             gpio_button_led(5, 0);
 
         }
-        //printf("|%s|%s|%s|%s|\n", wert1, wert2, wert3, wert4);
+        printf("|%s|%s|%s|%s|\n", wert1, wert2, wert3, wert4);
         usleep(200000);
     }
     return NULL;
@@ -1508,6 +1516,7 @@ void * foss(void *esContext) {
 void * ubongo(void *esContext) {
     UserData *userData = ((ESContext*) esContext)->userData;
     POS_T *posData = ((ESContext*) esContext)->posData;
+
     unsigned short ret = 0;
     sleep(3);
     while (1) {
@@ -1716,12 +1725,13 @@ double getDegrees(double lat1, double lon1, double lat2, double lon2) {
 
 void * pinto(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
+    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     PRINTF("\rPINTO gestartet\n");
 
     int counter = 0;
 
-    float speed = 0.0f, old_speed = 0.0f, deltatime = 0.0f;
+    float old_speed = 0.0f, deltatime = 0.0f;
     float deg, old_deg;
     struct timeval t1, t2, t_start, tv_tmp;
     int lk = 0, status;
@@ -1729,7 +1739,6 @@ void * pinto(void *esContext) {
 
     int gpsd_init = -1;
     //struct GPS_T gpsData;
-    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     int i2c_init = -1;
     enum e_i2c_status i2c_status;
@@ -1750,8 +1759,7 @@ void * pinto(void *esContext) {
     short i2c_x, i2c_y, i2c_z;
 #endif
 #ifdef __SENSOR_HUM__
-    float i2c_hum, i2c_temp;
-
+    float i2c_hum, i2c_temp, i2c_angle;
 #endif
     gettimeofday(&t_start, NULL);
     t1 = t_start;
@@ -1765,11 +1773,12 @@ void * pinto(void *esContext) {
         {&gpsData->fix_quality, sizeof (gpsData->fix_quality)},
         {&g_x, sizeof (double)},
         {&g_y, sizeof (double)},
-        {&speed, sizeof (speed)},
+        {&gpsData->speed, sizeof (gpsData->speed)},
         {&dist, sizeof (double)},
         {&posData->obd_speed, sizeof (float)},
         {&posData->obd_volt, sizeof (posData->obd_volt)},
         {&deg, sizeof (float)},
+        {&posData->i2c_angle, sizeof (posData->i2c_angle)},
         {&tv_sec, sizeof (tv_sec)},
         {&tv_usec, sizeof (tv_usec)}
     };
@@ -1789,7 +1798,7 @@ void * pinto(void *esContext) {
         old_g_x = g_x;
         old_g_y = g_y;
 
-        old_speed = speed;
+        old_speed = gpsData->speed;
         old_deg = deg;
 
         gettimeofday(&t2, NULL);
@@ -1857,6 +1866,12 @@ void * pinto(void *esContext) {
             } else {
                 PRINTF("OBD: fehler: \n");
             }
+            obdstatus = getobdvalue(obd_serial, 0x0E, &tmp_val, obdcmds_mode1[0x0E].bytes_returned, obdcmds_mode1[0x0E].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                posData->obd_tia = tmp_val;
+            } else {
+                PRINTF("OBD: fehler: \n");
+            }
         } else {
             if (obd_serial != -1) {
                 close(obd_serial);
@@ -1866,12 +1881,12 @@ void * pinto(void *esContext) {
 #endif
 #ifdef __SENSOR_HUM__
         if (i2c_init != -1) {
-            i2c_status = senseHat_read(&i2c_init, &i2c_hum, &i2c_temp);
+            i2c_status = senseHat_read(&i2c_init, &i2c_hum, &i2c_temp, &i2c_angle);
             lk = pthread_mutex_lock(&m_pinto);
             posData->i2c_hum = i2c_hum;
             posData->i2c_temp = i2c_temp;
+            posData->i2c_angle = i2c_angle;
             pthread_mutex_unlock(&m_pinto);
-
         } else {
             i2c_status = senseHat_init(&i2c_init, "/home/pi/uds_socket");
         }
@@ -1902,9 +1917,9 @@ void * pinto(void *esContext) {
                 deg = gpsData->angle;
 
                 dist = sqrt(pow(old_g_x - g_x, 2) + pow(old_g_y - g_y, 2)) * posData->osmS;
-                speed = dist / deltatime * 3600.0f;
-                if ((speed - old_speed) / deltatime > 10.0f /* km/h/s */) {
-                    speed = 10.0f - deltatime + old_speed;
+                gpsData->speed = dist / deltatime * 3600.0f;
+                if ((gpsData->speed - old_speed) / deltatime > 10.0f /* km/h/s */) {
+                    gpsData->speed = 10.0f - deltatime + old_speed;
                 }
 #ifdef __I2C__
                 if (i2c_init == -1) {
@@ -1922,7 +1937,6 @@ void * pinto(void *esContext) {
             } else {
                 gps_status[0] = 1.0f;
                 gps_status[2] = 0.0f;
-
             }
         } else {
             //gps_open(&gpsd_init, "/dev/ttyAMA0");
@@ -1937,7 +1951,7 @@ void * pinto(void *esContext) {
             gpsData->stamp = stamp;
             tv_tmp.tv_sec = tv_sec;
             tv_tmp.tv_usec = tv_usec;
-            PRINTF("\rgps_out %i: %i,%i: %f %f %f %f %f %f \n", counter, tv_tmp.tv_sec, tv_tmp.tv_usec, deltatime, g_x, g_y, dist, speed, deg);
+            PRINTF("\rgps_out %i: %i,%i: %f %f %f %f %f %f \n", counter, tv_tmp.tv_sec, tv_tmp.tv_usec, deltatime, g_x, g_y, dist, gpsData->speed, deg);
             counter++;
 
             lk = pthread_mutex_lock(&m_pinto);
@@ -1962,7 +1976,7 @@ void * pinto(void *esContext) {
             }
             fflush(gps_out);
 
-            printf("\r%f %f\n", io_gps[3].val, io_gps[4].val);
+            //printf("\r%f %f\n", io_gps[3].val, io_gps[4].val);
 
             fseek(eigenschaften, 0, SEEK_SET);
             fwrite(io_eigenschaften[0].val, io_eigenschaften[0].len, 1, eigenschaften);
