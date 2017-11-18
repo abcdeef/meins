@@ -901,12 +901,14 @@ enum obd_serial_status getobdbytes(int fd, unsigned int mode, unsigned int cmd, 
             sendbuflen = snprintf(sendbuf, sizeof (sendbuf), "%02X%02X%01X" OBDCMD_NEWLINE, mode, cmd, numbytes_expected);
         }
     }
-
+    //printf("numbytes_expected: %i\n", numbytes_expected);
+    //printf("->|%s|\n", sendbuf);
     if (write(fd, sendbuf, sendbuflen) < sendbuflen) {
         return OBD_ERROR;
     }
 
     nbytes = readserialdata(fd, retbuf, sizeof (retbuf));
+    //printf("%i: %s\n", nbytes, retbuf);
 
     //PRINTF("%s%c%iBytes%c|%s|\n", sendbuf, 9, nbytes, 9, retbuf);
 
@@ -1023,8 +1025,8 @@ int init_OBD(char *serial) {
 
     //long baudrate = 9600; // 0 - AUTO
     long baudrate = 115200;
-    long baudrate_target = -1;   
-    
+    long baudrate_target = -1;
+
     int fd = open(serial, O_RDWR | O_NOCTTY | O_NDELAY);
 
     if (fd == -1) {
@@ -1048,18 +1050,11 @@ int init_OBD(char *serial) {
         close(fd);
         return -1;
     }
-    // Set all to defaults
-    blindcmd(fd, "ATD", 1);
+
     // Reset the device.
     blindcmd(fd, "ATZ", 1);
-
-    /*
-    if (0 > upgradebaudrate(fd, baudrate_target, baudrate)) {
-        fprintf(stderr, "Error upgrading baudrate. Continuing, but may suffer issues\n");
-    }*/
-
-    //blindcmd(fd, "0100", 1);
-
+    // Set all to defaults
+    blindcmd(fd, "ATD", 1);
     // Disable command echo [elm327]
     blindcmd(fd, "ATE0", 1);
     // Disable linefeeds [an extra byte of speed can't hurt]
@@ -1068,15 +1063,45 @@ int init_OBD(char *serial) {
     blindcmd(fd, "ATS0", 1);
     // Headers off
     blindcmd(fd, "ATH0", 1);
-    // 
+    // Protocoll 5-  Lada Niva Euro4; 6-Toyota T27
     blindcmd(fd, "ATSP5", 1);
-    //blindcmd(fd, "ATTP5", 1); // Lada Niva Euro4
-    //blindcmd(fd, "ATTP6", 1); // Toyota
 
+    usleep(4000000);
     blindcmd(fd, "0100", 1);
 
+
+    //usleep(300000);
+    /*char outstr[1024];
+    char retbuf[4096];
+
+    snprintf(outstr, sizeof (outstr), "%s%s\0", "0100", OBDCMD_NEWLINE);
+
+    int a = 0;
+
+    //a = 28 -> OK
+    //a = 18 -> BUS INIT: ERROR
+    while (a < 28) {
+        write(fd, outstr, strlen(outstr));
+
+        a = readserialdata(fd, retbuf, sizeof (retbuf));
+
+        PRINTF("%s%c%iBytes%c|%s|\n", "0100", 9, a, 9, retbuf);
+
+        if (a < 28) {
+            blindcmd(fd, "ATWS", 1);
+            blindcmd(fd, "ATD", 1);
+            blindcmd(fd, "ATE0", 1);
+            blindcmd(fd, "ATL0", 1);
+            blindcmd(fd, "ATS0", 1);
+            blindcmd(fd, "ATH0", 1);
+            blindcmd(fd, "ATSP5", 1);
+            usleep(3000000);
+        }
+    }
+
+     */
     // optional
     //blindcmd(fd, "ATAMC", 1);
-    
+
     return fd;
 }

@@ -15,6 +15,16 @@ unsigned short red_mask = 0xF800;
 unsigned short green_mask = 0x7E0;
 unsigned short blue_mask = 0x1F;
 
+int32_t fp32(double value, int8_t Q) {
+    return (int32_t) (value * (1 << Q));
+}
+int64_t fp64(double value, int8_t Q) {
+    return (int64_t) (value * (1 << Q));
+}
+double pf32(int32_t value, int8_t Q) {
+    return (double) value / (double) (Q > 0 ? (1 << Q) : (1 >> (-Q)));
+}
+
 /*static size_t write_data(void *ptr, size_t size, size_t nmemb, void *stream) {
         size_t written = fwrite(ptr, size, nmemb, (FILE *) stream);
         return written;
@@ -53,6 +63,7 @@ void printBin2(unsigned short *CH) {
         printf("%i", P2_B2[n]);
     printf("\n");
 }
+
 /*
  * Delay (warten), Zeitangabe in Millisekunden
  */

@@ -280,7 +280,7 @@ typedef struct {
     short i2c_y;
     short i2c_z;
 
-    float obd_volt;
+    uint8_t obd_volt;
     float obd_coolant;
     float obd_speed;
     float obd_rpm;
@@ -1279,7 +1279,7 @@ void * foss(void *esContext) {
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     struct timespec spec0, spec1, asd;
-    uint_fast8_t display = 1;
+    uint_fast8_t display = 0;
 
     PRINTF("\rFOSS gestartet\n");
 
@@ -1336,7 +1336,7 @@ void * foss(void *esContext) {
 
             strftime(wert1, 6, "%R", &tm);
             snprintf(wert2, 6, "%3.0f", posData->i2c_temp);
-            snprintf(wert3, 6, "%4.1f", posData->obd_volt);
+            snprintf(wert3, 6, "%4.1f", ((float) posData->obd_volt) / 10.0f);
             snprintf(wert4, 6, "%4.1f", posData->i2c_hum);
 
             d_f[0] += f;
@@ -1480,7 +1480,7 @@ void * foss(void *esContext) {
             gpio_button_led(5, 0);
 
         }
-        printf("|%s|%s|%s|%s|\n", wert1, wert2, wert3, wert4);
+        //printf("|%s|%s|%s|%s|\n", wert1, wert2, wert3, wert4);
         usleep(200000);
     }
     return NULL;
@@ -1601,7 +1601,6 @@ void * deta_lvl2(void *esContext) {
 }
 
 void * deta_lvl3(void *esContext) {
-
     POS_T *posData = ((ESContext*) esContext)->posData;
     struct timespec spec0, spec1;
 
@@ -1731,9 +1730,11 @@ void * pinto(void *esContext) {
 
     int counter = 0;
 
-    float old_speed = 0.0f, deltatime = 0.0f;
+    float old_speed = 0.0f; //, deltatime = 0.0f;
+    //int deltatime = 0;
     float deg, old_deg;
-    struct timeval t1, t2, t_start, tv_tmp;
+    struct timeval t_start, tv_tmp;
+    struct timespec to1, to2, t1, t2;
     int lk = 0, status;
     double g_x, g_y, old_lat, old_lon, old_g_x, old_g_y, dist;
 
@@ -1761,26 +1762,25 @@ void * pinto(void *esContext) {
 #ifdef __SENSOR_HUM__
     float i2c_hum, i2c_temp, i2c_angle;
 #endif
-    gettimeofday(&t_start, NULL);
-    t1 = t_start;
 
-
-    int32_t stamp, tv_sec, tv_usec;
+    int64_t gi_x, gi_y;
+    uint32_t stamp, deltatime;
+    int32_t tv_sec, tv_usec;
 
     T_IO io_gps[] = {
-        {&deltatime, sizeof (float)},
+        {&deltatime, sizeof (int)},
         {&stamp, sizeof (stamp)},
         {&gpsData->fix_quality, sizeof (gpsData->fix_quality)},
         {&g_x, sizeof (double)},
         {&g_y, sizeof (double)},
-        {&gpsData->speed, sizeof (gpsData->speed)},
+        {&gi_x, sizeof (int64_t)},
+        {&gi_y, sizeof (int64_t)},
+        //{&gpsData->speed, sizeof (gpsData->speed)},
         {&dist, sizeof (double)},
         {&posData->obd_speed, sizeof (float)},
         {&posData->obd_volt, sizeof (posData->obd_volt)},
         {&deg, sizeof (float)},
         {&posData->i2c_angle, sizeof (posData->i2c_angle)},
-        {&tv_sec, sizeof (tv_sec)},
-        {&tv_usec, sizeof (tv_usec)}
     };
     printf("io_gps:");
     for (int a = 0; a<sizeof (io_gps) / sizeof (T_IO); a++) {
@@ -1788,9 +1788,9 @@ void * pinto(void *esContext) {
     }
     printf("\n");
 
-
+    clock_gettime(CLOCK_MONOTONIC, &t1);
     while (1) {
-        usleep(2000000);
+        //usleep(200000);
 
         old_lat = posData->gps_latitude;
         old_lon = posData->gps_longitude;
@@ -1801,22 +1801,22 @@ void * pinto(void *esContext) {
         old_speed = gpsData->speed;
         old_deg = deg;
 
-        gettimeofday(&t2, NULL);
-        deltatime = (float) (t2.tv_sec - t1.tv_sec + (t2.tv_usec - t1.tv_usec) * 1e-6) * 1000;
-
-        //elapsed = (t2.tv_sec - t_start.tv_sec)*1000 + (t2.tv_usec - t_start.tv_usec) / 1000;
-        t1 = t2;
-
 #ifdef __OBD__     
+        //clock_gettime(CLOCK_MONOTONIC, &to1);
         if (obd_serial != -1) {
+            //clock_gettime(CLOCK_MONOTONIC, &to1);
             snprintf(outstr, sizeof (outstr), "%s%s\0", "ATRV", "\r");
             write(obd_serial, outstr, strlen(outstr));
 
             nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
-            //PRINTF("ATRV%c%iBytes%c|%s|\n", 9, nbytes, 9, retbuf);
             retbuf[4] = '\0';
-            sscanf(retbuf, "%f", &posData->obd_volt);
+            sscanf(retbuf, "%f", &tmp_val);
+            posData->obd_volt = (uint8_t) (tmp_val * 10.0f);
+            //clock_gettime(CLOCK_MONOTONIC, &to2);
+            //printf("obd_U: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
 
+
+            //clock_gettime(CLOCK_MONOTONIC, &to1);
             obdstatus = getobdvalue(obd_serial, 0x0D, &tmp_val, obdcmds_mode1[0x0D].bytes_returned, obdcmds_mode1[0x0D].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_speed = tmp_val;
@@ -1824,14 +1824,36 @@ void * pinto(void *esContext) {
                 PRINTF("OBD 0x0D fehler\n");
                 obd_serial = -1;
             }
+            //clock_gettime(CLOCK_MONOTONIC, &to2);
+            //printf("obd_V: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
 
-            obdstatus = getobdvalue(obd_serial, 0x05, &tmp_val, obdcmds_mode1[0x05].bytes_returned, obdcmds_mode1[0x05].conv);
+
+            /*clock_gettime(CLOCK_MONOTONIC, &to1);
+            int sendbuflen = snprintf(outstr, sizeof (outstr), "%s%s\0", "0105", "\r");
+            
+            if (write(obd_serial, outstr, sendbuflen) < sendbuflen) {
+                printf("OBD_ERROR\n");
+            }
+            nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
+
+            printf("->|%c%c%c%c%c%c|\n", retbuf[0], retbuf[1], retbuf[2], retbuf[3], retbuf[4], retbuf[5]);
+            clock_gettime(CLOCK_MONOTONIC, &to2);
+            printf("obd_C: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
+             */
+
+            //clock_gettime(CLOCK_MONOTONIC, &to1);
+            /*obdstatus = getobdvalue(obd_serial, 0x05, &tmp_val, obdcmds_mode1[0x05].bytes_returned, obdcmds_mode1[0x05].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_coolant = tmp_val;
             } else {
                 PRINTF("OBD 0x05 fehler\n");
                 obd_serial = -1;
-            }
+            }*/
+            //clock_gettime(CLOCK_MONOTONIC, &to2);
+            //printf("obd_C: %lims %f\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000, posData->obd_coolant);
+            //exit(0);
+
+            //clock_gettime(CLOCK_MONOTONIC, &to1);
             obdstatus = getobdvalue(obd_serial, 0x10, &tmp_val, obdcmds_mode1[0x10].bytes_returned, obdcmds_mode1[0x10].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_maf = tmp_val;
@@ -1839,6 +1861,10 @@ void * pinto(void *esContext) {
                 PRINTF("OBD 0x10 fehler\n");
                 obd_serial = -1;
             }
+            //clock_gettime(CLOCK_MONOTONIC, &to2);
+            //printf("obd_MAF: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
+
+            //clock_gettime(CLOCK_MONOTONIC, &to1);
             obdstatus = getobdvalue(obd_serial, 0x0F, &tmp_val, obdcmds_mode1[0x0F].bytes_returned, obdcmds_mode1[0x0F].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_iat = tmp_val;
@@ -1846,6 +1872,10 @@ void * pinto(void *esContext) {
                 PRINTF("OBD 0x0F fehler\n");
                 obd_serial = -1;
             }
+            //clock_gettime(CLOCK_MONOTONIC, &to2);
+            //printf("obd_IAT: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
+
+            //clock_gettime(CLOCK_MONOTONIC, &to1);
             obdstatus = getobdvalue(obd_serial, 0x14, &tmp_val, obdcmds_mode1[0x14].bytes_returned, obdcmds_mode1[0x14].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_o21 = tmp_val;
@@ -1853,6 +1883,10 @@ void * pinto(void *esContext) {
                 PRINTF("OBD 0x14 fehler\n");
                 obd_serial = -1;
             }
+            //clock_gettime(CLOCK_MONOTONIC, &to2);
+            //printf("obd_o21: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
+
+            //clock_gettime(CLOCK_MONOTONIC, &to1);
             obdstatus = getobdvalue(obd_serial, 0x15, &tmp_val, obdcmds_mode1[0x15].bytes_returned, obdcmds_mode1[0x15].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_o22 = tmp_val;
@@ -1860,26 +1894,39 @@ void * pinto(void *esContext) {
                 PRINTF("OBD 0x15 fehler\n");
                 obd_serial = -1;
             }
-            obdstatus = getobdvalue(obd_serial, 0x0C, &tmp_val, obdcmds_mode1[0x0C].bytes_returned, obdcmds_mode1[0x0C].conv);
+            //clock_gettime(CLOCK_MONOTONIC, &to2);
+            //printf("obd_O22: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
+
+            //clock_gettime(CLOCK_MONOTONIC, &to1);
+            /*obdstatus = getobdvalue(obd_serial, 0x0C, &tmp_val, obdcmds_mode1[0x0C].bytes_returned, obdcmds_mode1[0x0C].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_rpm = tmp_val;
             } else {
                 PRINTF("OBD: fehler: \n");
-            }
+            }*/
+            //clock_gettime(CLOCK_MONOTONIC, &to2);
+            //printf("obd_RPM: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
+
+            //clock_gettime(CLOCK_MONOTONIC, &to1);
             obdstatus = getobdvalue(obd_serial, 0x0E, &tmp_val, obdcmds_mode1[0x0E].bytes_returned, obdcmds_mode1[0x0E].conv);
             if (OBD_SUCCESS == obdstatus) {
                 posData->obd_tia = tmp_val;
             } else {
                 PRINTF("OBD: fehler: \n");
             }
+            //clock_gettime(CLOCK_MONOTONIC, &to2);
+            //printf("obd_TIA: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
         } else {
             if (obd_serial != -1) {
                 close(obd_serial);
             }
             obd_serial = init_OBD(OBD_SERIAL);
         }
+        //clock_gettime(CLOCK_MONOTONIC, &to2);
+        //printf("obd: %ims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
 #endif
 #ifdef __SENSOR_HUM__
+        //clock_gettime(CLOCK_MONOTONIC, &to1);
         if (i2c_init != -1) {
             i2c_status = senseHat_read(&i2c_init, &i2c_hum, &i2c_temp, &i2c_angle);
             lk = pthread_mutex_lock(&m_pinto);
@@ -1890,6 +1937,8 @@ void * pinto(void *esContext) {
         } else {
             i2c_status = senseHat_init(&i2c_init, "/home/pi/uds_socket");
         }
+        //clock_gettime(CLOCK_MONOTONIC, &to2);
+        //printf("senseHat: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
 #endif
 #ifdef __I2C__
         if (i2c_init != -1) {
@@ -1905,6 +1954,7 @@ void * pinto(void *esContext) {
 #endif
 
 #ifdef __GPS__
+        //clock_gettime(CLOCK_MONOTONIC, &to1);
         if (gpsd_init != -1) {
             gps_read(&gpsd_init, gpsData);
             //PRINTF("\rgps: type=%i pdop=%f\n", gpsData->fix_type, gpsData->PDOP);
@@ -1917,10 +1967,10 @@ void * pinto(void *esContext) {
                 deg = gpsData->angle;
 
                 dist = sqrt(pow(old_g_x - g_x, 2) + pow(old_g_y - g_y, 2)) * posData->osmS;
-                gpsData->speed = dist / deltatime * 3600.0f;
-                if ((gpsData->speed - old_speed) / deltatime > 10.0f /* km/h/s */) {
-                    gpsData->speed = 10.0f - deltatime + old_speed;
-                }
+                //gpsData->speed = dist / deltatime * 3600.0f;
+                //if ((gpsData->speed - old_speed) / deltatime > 10.0f /* km/h/s */) {
+                //    gpsData->speed = 10.0f - deltatime + old_speed;
+                //}
 #ifdef __I2C__
                 if (i2c_init == -1) {
                     deg = getDegrees(old_lat, old_lon, gpsData->fix.latitude, gpsData->fix.longitude);
@@ -1942,7 +1992,13 @@ void * pinto(void *esContext) {
             //gps_open(&gpsd_init, "/dev/ttyAMA0");
             gps_open(&gpsd_init, "/dev/ttyS0");
         }
+        //clock_gettime(CLOCK_MONOTONIC, &to2);
+        //printf("gps: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
 #endif
+
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        deltatime = (t2.tv_sec - t1.tv_sec) * 1000 + (t2.tv_nsec - t1.tv_nsec) / 1000000;
+        t1 = t2;
 
         if (gps_in != NULL) {
             for (int a = 0; a<sizeof (io_gps) / sizeof (T_IO); a++) {
@@ -1965,18 +2021,21 @@ void * pinto(void *esContext) {
             gps_status[2] = 1.0f;
 
         } else {
-            tv_tmp.tv_sec = t2.tv_sec;
-            tv_tmp.tv_usec = t2.tv_usec;
+            //tv_tmp.tv_sec = t2.tv_sec;
+            //tv_tmp.tv_usec = t2.tv_usec;
 
             stamp = gpsData->stamp;
-            tv_sec = tv_tmp.tv_sec;
-            tv_usec = tv_tmp.tv_usec;
+            //tv_sec = tv_tmp.tv_sec;
+            //tv_usec = tv_tmp.tv_usec;
+
+            gi_x = fp64(g_x, 32);
+            gi_y = fp64(g_y, 32);
+            //for (int i = 32 - 1; i >= 0; i--) printf("%1d%s", (deltatime >> i)&1, (i % 4 || !i) ? "" : "");
+            //printf("\ndt: %ims\n#############\n", deltatime);
             for (int a = 0; a<sizeof (io_gps) / sizeof (T_IO); a++) {
                 fwrite(io_gps[a].val, io_gps[a].len, 1, gps_out);
             }
             fflush(gps_out);
-
-            //printf("\r%f %f\n", io_gps[3].val, io_gps[4].val);
 
             fseek(eigenschaften, 0, SEEK_SET);
             fwrite(io_eigenschaften[0].val, io_eigenschaften[0].len, 1, eigenschaften);
