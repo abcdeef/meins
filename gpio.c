@@ -29,7 +29,8 @@ volatile unsigned int *gpio;
 #define GPIO_DATA7 10
 
 /* RS, E, RW, DATA0, DATA1, DATA2, DATA3, DATA4, DATA5, DATA6, DATA7 */
-int LCD_BUS[11] = {20, 19, 25, 24, 16, 23, 13, 22, 12, 27, 6};
+//int LCD_BUS[11] = {20, 19, 25, 24, 16, 23, 13, 22, 12, 27, 6};
+int LCD_BUS[11] = {20, 19, 24, 9, 16, 10, 13, 22, 12, 27, 6};
 //int GPIO_FD[11];
 
 int bl_write(char *value) {
@@ -61,8 +62,8 @@ void gpio_init() {
     gpio_map = mmap(
             NULL, //Any adddress in our space will do
             BLOCK_SIZE, //Map length
-            PROT_READ | PROT_WRITE, // Enable reading & writting to mapped memory
-            MAP_SHARED, //Shared with other processes
+            PROT_READ | PROT_WRITE | PROT_EXEC, // Enable reading & writting to mapped memory
+            MAP_SHARED | MAP_LOCKED, //Shared with other processes
             mem_fd, //File to map
             GPIO_BASE //Offset to GPIO peripheral
             );
@@ -70,7 +71,7 @@ void gpio_init() {
     close(mem_fd); //No need to keep mem_fd open after mmap
 
     if (gpio_map == MAP_FAILED) {
-        printf("mmap error %d\n", (int) gpio_map); //errno also set!
+        printf("mmap error\n"); //errno also set!
         exit(-1);
     }
 
@@ -147,12 +148,16 @@ void gpio_lcd_send_byte(char bits, char *mode) {
 }
 #endif
 
-void gpio_lcd_init() {
-    gpio_init();
+void gpio_lcd_shutdown(void) {
+    gpio_lcd_send_byte(0x08, GPIO_LOW); // Display off
+}
 
+void gpio_lcd_init() {
+    //gpio_init();
     // Buttons
     INP_GPIO(17);
     INP_GPIO(18);
+
     // BUTTON LED    
     INP_GPIO(5);
     OUT_GPIO(5);
@@ -175,7 +180,8 @@ void gpio_lcd_init() {
 #ifdef __RASPI__
 
 void gpio_get_button(unsigned int *button) {
-    *button = GET_GPIO(18);
+    //*button = GET_GPIO(18);
+    *button = GET_GPIO(17);
 }
 
 void gpio_button_led(uint_fast8_t port, uint_fast8_t mode) {
