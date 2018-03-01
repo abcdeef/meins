@@ -670,7 +670,7 @@ int readserialdata(int fd, char *buf, int n) {
 void blindcmd(int fd, const char *cmd, int no_response) {
     char outstr[1024];
 
-    snprintf(outstr, sizeof (outstr), "%s%s\0", cmd, OBDCMD_NEWLINE);
+    snprintf(outstr, sizeof (outstr), "%s%s%c", cmd, OBDCMD_NEWLINE, '\0');
 
     write(fd, outstr, strlen(outstr));
 
@@ -1025,7 +1025,7 @@ int init_OBD(char *serial) {
 
     //long baudrate = 9600; // 0 - AUTO
     long baudrate = 115200;
-    long baudrate_target = -1;
+    //long baudrate_target = -1;
 
     int fd = open(serial, O_RDWR | O_NOCTTY | O_NDELAY);
 

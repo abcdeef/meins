@@ -2,8 +2,8 @@
 
 extern int delay(unsigned long millis);
 
-int mem_fd;
-void *gpio_map;
+//int mem_fd;
+//void *gpio_map;
 volatile unsigned int *gpio;
 #define BLOCK_SIZE (4*1024)
 #define BCM2708_PERI_BASE        0x3F000000
@@ -52,13 +52,14 @@ int bl_write(char *value) {
     close(fd);
     return (0);
 }
-
 void gpio_init() {
+    int mem_fd;
+
     if ((mem_fd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
         printf("can't open /dev/mem \n");
         exit(-1);
     }
-
+    void *gpio_map;
     gpio_map = mmap(
             NULL, //Any adddress in our space will do
             BLOCK_SIZE, //Map length
@@ -179,14 +180,14 @@ void gpio_lcd_init() {
 
 #ifdef __RASPI__
 
-void gpio_get_button(unsigned int *button) {
+//void gpio_get_button(unsigned int *button) {
     //*button = GET_GPIO(18);
-    *button = GET_GPIO(17);
-}
+    //*button = GET_GPIO(17);
+//}
 
-void gpio_button_led(uint_fast8_t port, uint_fast8_t mode) {
-    GPIO_SET = mode << port;
-}
+//void gpio_button_led(uint_fast8_t port, uint_fast8_t mode) {
+//    GPIO_SET = mode << port;
+//}
 #else
 
 void gpio_get_button(unsigned int *button) {
@@ -214,7 +215,7 @@ void gpio_set_lcd_maske(uint_fast8_t display) {
         gpio_lcd_send_byte(LCD_LINE_2 + 7, GPIO_LOW);
         gpio_lcd_send_byte('V', GPIO_HIGH);
 
-        gpio_lcd_send_byte(LCD_LINE_2 + 11, GPIO_LOW);
+        gpio_lcd_send_byte(LCD_LINE_2 + 12, GPIO_LOW);
         gpio_lcd_send_byte('R', GPIO_HIGH);
         gpio_lcd_send_byte('H', GPIO_HIGH);
         gpio_lcd_send_byte(':', GPIO_HIGH);

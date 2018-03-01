@@ -1113,13 +1113,14 @@ void * thread_foss(void *esContext) {
     memset(&d_f[0], 128, sizeof (d_f));
     uint32_t button, button_old;
 
+    volatile unsigned int *gpio;
     gpio_init();
     gpio_lcd_init();
 
-    gpio_get_button(&button_old);
+    //gpio_get_button(&button_old);
 
     // Button beleuchten
-    gpio_button_led(5, 1);
+    //gpio_button_led(5, 1);
 
     //bl_write(BL_ON);
 
@@ -1146,7 +1147,7 @@ void * thread_foss(void *esContext) {
         //printf("\r%ums\n", f);
         spec0 = spec1;
 
-        gpio_get_button(&button);
+        //gpio_get_button(&button);
         if ((button & (1 << 17)) >> 17 == 0 && (button_old & (1 << 17)) >> 17 == 0) {
             d_button += f;
         }
@@ -1325,7 +1326,7 @@ void * thread_foss(void *esContext) {
             }
              */
         } else if (display == 4) {
-            gpio_button_led(5, 0);
+            //gpio_button_led(5, 0);
 
         }
         //printf("|%s|%s|%s|%s|\n", wert1, wert2, wert3, wert4);
@@ -2248,7 +2249,7 @@ static int sqc_route_lvl3(void *a, int argc, char **argv, char **azColName) {
 void ShutDown(int signum) {
     //void sigfunc(int sig) 
     gpio_lcd_shutdown();
-    gpio_button_led(5, 0);
+    //gpio_button_led(5, 0);
     UserData *userData = esContext.userData;
     //POS_T *posData = esContext.posData;
 

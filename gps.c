@@ -694,7 +694,7 @@ void nmea(char *line, GPS_T *data) {
         {
             struct minmea_sentence_gsa frame;
             if (minmea_parse_gsa(&frame, line)) {
-                data->fix_type = frame.fix_type;
+                data->fix_type = (uint8_t) frame.fix_type;
                 data->PDOP = minmea_tofloat(&frame.pdop);
                 data->HDOP = minmea_tofloat(&frame.hdop);
 
@@ -785,8 +785,9 @@ void gps_open(int *uart0_filestream, char *uart_dev) {
 }
 
 void gps_read(int *uart0_filestream, GPS_T *data) {
-    int rx_length = read(*uart0_filestream, (void*) &rx_buffer[rx_asd], BUFFER_LEN - 1);
-
+    //printf("###############################\n");
+    ssize_t rx_length = read(*uart0_filestream, (void*) &rx_buffer[rx_asd], BUFFER_LEN - 1);
+    //printf("#%i\n", rx_length);
     if ((rx_asd + rx_length) > BUFFER_LEN) {
         rx_asd = 0;
     } else if (rx_length > 0) {
