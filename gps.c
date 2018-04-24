@@ -663,7 +663,7 @@ void nmea(char *line, GPS_T *data) {
                 if (abs(data->stamp - time(NULL)) > 60) {
                     stime(&data->stamp);
                     strftime(buffer, 80, "%d.%m.%Y %H:%M", localtime(&data->stamp));
-                    //printf("%s\n", buffer);
+                    printf("setze Uhrzeit: %s\n", buffer);
                 }
 #endif
                 /*

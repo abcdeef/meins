@@ -30,7 +30,8 @@ volatile unsigned int *gpio;
 
 /* RS, E, RW, DATA0, DATA1, DATA2, DATA3, DATA4, DATA5, DATA6, DATA7 */
 //int LCD_BUS[11] = {20, 19, 25, 24, 16, 23, 13, 22, 12, 27, 6};
-int LCD_BUS[11] = {20, 19, 24, 9, 16, 10, 13, 22, 12, 27, 6};
+//int LCD_BUS[11] = {20, 19, 24, 9, 16, 10, 13, 22, 12, 27,  6};
+  int LCD_BUS[11] = {21, 20,  6, 5, 19,  9, 16, 10, 13, 22, 12};
 //int GPIO_FD[11];
 
 int bl_write(char *value) {
@@ -52,6 +53,7 @@ int bl_write(char *value) {
     close(fd);
     return (0);
 }
+
 void gpio_init() {
     int mem_fd;
 
@@ -157,11 +159,14 @@ void gpio_lcd_init() {
     //gpio_init();
     // Buttons
     INP_GPIO(17);
+    sleep(1);
     INP_GPIO(18);
-
+    sleep(1);
     // BUTTON LED    
     INP_GPIO(5);
+    sleep(1);
     OUT_GPIO(5);
+    sleep(1);
 
     // 8-Bit Bus OLED
     for (uint_fast8_t n = 0; n < 11; n++) {
@@ -180,10 +185,10 @@ void gpio_lcd_init() {
 
 #ifdef __RASPI__
 
-//void gpio_get_button(unsigned int *button) {
+void gpio_get_button(unsigned int *button) {
     //*button = GET_GPIO(18);
-    //*button = GET_GPIO(17);
-//}
+    *button = GET_GPIO(17);
+}
 
 //void gpio_button_led(uint_fast8_t port, uint_fast8_t mode) {
 //    GPIO_SET = mode << port;

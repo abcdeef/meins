@@ -1113,7 +1113,7 @@ void * thread_foss(void *esContext) {
     memset(&d_f[0], 128, sizeof (d_f));
     uint32_t button, button_old;
 
-    volatile unsigned int *gpio;
+    //volatile unsigned int *gpio;
     gpio_init();
     gpio_lcd_init();
 
@@ -1147,27 +1147,27 @@ void * thread_foss(void *esContext) {
         //printf("\r%ums\n", f);
         spec0 = spec1;
 
-        //gpio_get_button(&button);
-        if ((button & (1 << 17)) >> 17 == 0 && (button_old & (1 << 17)) >> 17 == 0) {
+        gpio_get_button(&button);
+        /*if ((button & (1 << 17)) >> 17 == 0 && (button_old & (1 << 17)) >> 17 == 0) {
             d_button += f;
         }
         if ((button & (1 << 17)) >> 17 == 1 && (button_old & (1 << 17)) >> 17 == 0) {
-            //d_button += f;
+            d_button += f;
             //if (d_button != 0)
-            printf("%u\n", d_button);
+            //printf("%u\n", d_button);
         }
         if ((button & (1 << 17)) >> 17 == 0 && (button_old & (1 << 17)) >> 17 == 1) {
             d_button = f;
-        }
+        }*/
         //printf("%u\n", button);
-        /*if ((button & (1 << 17)) >> 17 == 0 && (button_old & (1 << 17)) >> 17 == 1) {
+        if ((button & (1 << 17)) >> 17 == 0 && (button_old & (1 << 17)) >> 17 == 1) {
             display++;
             display %= 4;
-            gpio_button_led(5, 1);
+            //gpio_button_led(5, 1);
             memset(&d_f[0], 128, sizeof (d_f));
             gpio_set_lcd_maske(display);
             printf("Button press\n");
-        }*/
+        }
         button_old = button;
 
         if (display == 0) {
@@ -1423,7 +1423,7 @@ void * thread_ubongo(void *esContext) {
             }
         } else {
             //printf("####gpsd_init: %i\n", gpsd_init);
-            gps_open(&gpsd_init, "/dev/ttyS0");
+            gps_open(&gpsd_init, "/dev/ttyACM0");
             //printf("####gpsd_init: %i\n", gpsd_init);
         }
 #endif
@@ -2505,7 +2505,7 @@ int main(int argc, char *argv[]) {
     //pthread_create(&thread_id5, NULL, &thread_deta_lvl3, (void*) &esContext);
     pthread_create(&thread_id6, NULL, &thread_ubongo, (void*) &esContext);
 
-    //thread_render(&esContext);
+    thread_render(&esContext);
 
     pthread_join(thread_id1, NULL);
     pthread_join(thread_id2, NULL);
