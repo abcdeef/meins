@@ -661,9 +661,9 @@ void nmea(char *line, GPS_T *data) {
                 putenv("TZ=Europe/Berlin");
 
                 if (abs(data->stamp - time(NULL)) > 60) {
-                    stime(&data->stamp);
-                    strftime(buffer, 80, "%d.%m.%Y %H:%M", localtime(&data->stamp));
-                    printf("setze Uhrzeit: %s\n", buffer);
+                    //stime(&data->stamp);
+                    //strftime(buffer, 80, "%d.%m.%Y %H:%M", localtime(&data->stamp));
+                    //printf("setze Uhrzeit: %s\n", buffer);
                 }
 #endif
                 /*

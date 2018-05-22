@@ -310,6 +310,15 @@ typedef struct {
     float obd_o22;
     float obd_iat;
     float obd_tia;
+    float obd_stft;
+    float obd_ltft;
+    float obd_throttle;
+    unsigned int obd_dct_count;
+    char obf_dtc1[4];
+    char obf_dtc2[4];
+    char obf_dtc3[4];
+
+    uint_fast8_t * display;
 
     float i2c_hum;
     float i2c_temp;
@@ -1066,8 +1075,8 @@ void initPOS(ESContext * esContext) {
         eigenschaften = fopen(HOME "sit2d_pos", "wb");
 
         printf("\rinitPOS: sit2d_pos leer.\n");
-        posData->gps_latitude = 52.0493684;
-        posData->gps_longitude = 11.6439652;
+        posData->gps_latitude = 52.131538;
+        posData->gps_longitude = 11.653050;
         posData->gps_altitude = 0.0;
         posData->angle = 0.0f;
 
@@ -1103,7 +1112,10 @@ void * thread_foss(void *esContext) {
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     struct timespec spec0, spec1, asd;
-    uint_fast8_t display = 0;
+    uint_fast8_t display0[] = {0, 2, 3}, display1[] = {1, 4, 5};
+    uint_fast8_t display0_c = 0, display1_c = 0;
+    posData->display = &display0[display0_c];
+    //posData->display = &display1[2];
 
     PRINTF("\rFOSS gestartet\n");
 
@@ -1117,27 +1129,149 @@ void * thread_foss(void *esContext) {
     gpio_init();
     gpio_lcd_init();
 
-    //gpio_get_button(&button_old);
+    // Intro laden
+    gpio_lcd_send_byte(0x40, GPIO_LOW);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
 
-    // Button beleuchten
-    //gpio_button_led(5, 1);
+    gpio_lcd_send_byte(0x58, GPIO_LOW);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
 
-    //bl_write(BL_ON);
+    gpio_lcd_send_byte(0x48, GPIO_LOW);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
 
+    gpio_lcd_send_byte(0x60, GPIO_LOW);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+
+    gpio_lcd_send_byte(0x50, GPIO_LOW);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+
+    gpio_lcd_send_byte(0x68, GPIO_LOW);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+
+    // Intro abspielen
     gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+    gpio_lcd_send_byte(32, GPIO_HIGH);
+    gpio_lcd_send_byte(32, GPIO_HIGH);
+    gpio_lcd_send_byte(LCD_LINE_2, GPIO_LOW);
+    gpio_lcd_send_byte(32, GPIO_HIGH);
+    gpio_lcd_send_byte(32, GPIO_HIGH);
+
+    gpio_lcd_send_byte(LCD_LINE_1 + 2, GPIO_LOW);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(LCD_LINE_2 + 2, GPIO_LOW);
+    gpio_lcd_send_byte(3, GPIO_HIGH);
+    gpio_lcd_send_byte(3, GPIO_HIGH);
+
+    gpio_lcd_send_byte(LCD_LINE_1 + 4, GPIO_LOW);
+    gpio_lcd_send_byte(1, GPIO_HIGH);
+    gpio_lcd_send_byte(1, GPIO_HIGH);
+    gpio_lcd_send_byte(LCD_LINE_2 + 4, GPIO_LOW);
+    gpio_lcd_send_byte(4, GPIO_HIGH);
+    gpio_lcd_send_byte(4, GPIO_HIGH);
+
+    gpio_lcd_send_byte(LCD_LINE_1 + 6, GPIO_LOW);
+    gpio_lcd_send_byte(2, GPIO_HIGH);
+    gpio_lcd_send_byte(2, GPIO_HIGH);
+    gpio_lcd_send_byte(LCD_LINE_2 + 6, GPIO_LOW);
+    gpio_lcd_send_byte(5, GPIO_HIGH);
+    gpio_lcd_send_byte(5, GPIO_HIGH);
+
+    gpio_lcd_send_byte(LCD_LINE_1 + 8, GPIO_LOW);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(LCD_LINE_2 + 8, GPIO_LOW);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+    gpio_lcd_send_byte(255, GPIO_HIGH);
+
+    gpio_lcd_send_byte(LCD_LINE_1 + 12, GPIO_LOW);
+    gpio_lcd_send_byte(2, GPIO_HIGH);
+    gpio_lcd_send_byte(2, GPIO_HIGH);
+    gpio_lcd_send_byte(LCD_LINE_2 + 12, GPIO_LOW);
+    gpio_lcd_send_byte(5, GPIO_HIGH);
+    gpio_lcd_send_byte(5, GPIO_HIGH);
+
+    gpio_lcd_send_byte(LCD_LINE_1 + 14, GPIO_LOW);
+    gpio_lcd_send_byte(1, GPIO_HIGH);
+    gpio_lcd_send_byte(1, GPIO_HIGH);
+    gpio_lcd_send_byte(LCD_LINE_2 + 14, GPIO_LOW);
+    gpio_lcd_send_byte(4, GPIO_HIGH);
+    gpio_lcd_send_byte(4, GPIO_HIGH);
+
+    gpio_lcd_send_byte(LCD_LINE_1 + 16, GPIO_LOW);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(0, GPIO_HIGH);
+    gpio_lcd_send_byte(LCD_LINE_2 + 16, GPIO_LOW);
+    gpio_lcd_send_byte(3, GPIO_HIGH);
+    gpio_lcd_send_byte(3, GPIO_HIGH);
+
+    gpio_lcd_send_byte(LCD_LINE_1 + 18, GPIO_LOW);
+    gpio_lcd_send_byte(32, GPIO_HIGH);
+    gpio_lcd_send_byte(32, GPIO_HIGH);
+    gpio_lcd_send_byte(LCD_LINE_2 + 18, GPIO_LOW);
+    gpio_lcd_send_byte(32, GPIO_HIGH);
+    gpio_lcd_send_byte(32, GPIO_HIGH);
+
+
     for (uint_fast8_t f = 0; f < 20; f++) {
-        gpio_lcd_send_byte(255, GPIO_HIGH);
-    }
-    gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
-    for (uint_fast8_t f = 0; f < 20; f++) {
+        gpio_lcd_send_byte(LCD_LINE_1 + f, GPIO_LOW);
+        gpio_lcd_send_byte(32, GPIO_HIGH);
+        gpio_lcd_send_byte(LCD_LINE_2 + f, GPIO_LOW);
         gpio_lcd_send_byte(32, GPIO_HIGH);
     }
 
-    gpio_set_lcd_maske(display);
+    gpio_set_lcd_maske(*posData->display, &posData->obd_speed);
 
     char wert1[20], wert2[20], wert3[20], wert4[20];
     char wert1_old[20], wert2_old[20], wert3_old[20], wert4_old[20];
     uint_fast8_t old_rpm = 0;
+    float old_speed = 0.0f;
 
     clock_gettime(CLOCK_MONOTONIC, &spec0);
 
@@ -1148,38 +1282,57 @@ void * thread_foss(void *esContext) {
         spec0 = spec1;
 
         gpio_get_button(&button);
-        /*if ((button & (1 << 17)) >> 17 == 0 && (button_old & (1 << 17)) >> 17 == 0) {
-            d_button += f;
-        }
-        if ((button & (1 << 17)) >> 17 == 1 && (button_old & (1 << 17)) >> 17 == 0) {
-            d_button += f;
-            //if (d_button != 0)
-            //printf("%u\n", d_button);
-        }
+
         if ((button & (1 << 17)) >> 17 == 0 && (button_old & (1 << 17)) >> 17 == 1) {
-            d_button = f;
-        }*/
-        //printf("%u\n", button);
-        if ((button & (1 << 17)) >> 17 == 0 && (button_old & (1 << 17)) >> 17 == 1) {
-            display++;
-            display %= 4;
-            //gpio_button_led(5, 1);
+            display1_c = sizeof (display1) / sizeof (display1[0]) - 1;
+            display0_c++;
+            display0_c %= sizeof (display0) / sizeof (display0[0]);
+            posData->display = &display0[display0_c];
             memset(&d_f[0], 128, sizeof (d_f));
-            gpio_set_lcd_maske(display);
-            printf("Button press\n");
+            gpio_set_lcd_maske(*posData->display, &posData->obd_speed);
+            memset(&wert3_old[0], 0, sizeof (wert3_old));
+        }
+        if ((button & (1 << 18)) >> 18 == 0 && (button_old & (1 << 18)) >> 18 == 1) {
+            display0_c = sizeof (display0) / sizeof (display0[0]) - 1;
+            display1_c++;
+            display1_c %= sizeof (display1) / sizeof (display1[0]);
+            posData->display = &display1[display1_c];
+            memset(&d_f[0], 128, sizeof (d_f));
+            gpio_set_lcd_maske(*posData->display, &posData->obd_speed);
         }
         button_old = button;
 
-        if (display == 0) {
+        if (*posData->display == 0) {
             t = time(NULL);
             tm = *localtime(&t);
 
-            strftime(wert1, 6, "%R", &tm);
-            snprintf(wert2, 6, "%3.0f", posData->i2c_temp);
-            snprintf(wert3, 6, "%4.1f", ((float) posData->obd_volt) / 10.0f);
-            snprintf(wert4, 6, "%4.1f", posData->i2c_hum);
+            float lps = 0.0f;
+            if (posData->obd_speed != 0.0f) {
+                lps = posData->obd_speed / (posData->obd_maf * 0.326530612 * (1.0f + posData->obd_stft / 100.0f));
+            } else {
+                lps = posData->obd_maf * 0.326530612 * (1.0f + posData->obd_stft / 100.0f);
+            }
+            if (old_speed == 0.0f && posData->obd_speed > 0.0f) {
+                gpio_lcd_send_byte(LCD_LINE_1 + 10, GPIO_LOW);
+                gpio_lcd_send_byte('K', GPIO_HIGH);
+                gpio_lcd_send_byte('M', GPIO_HIGH);
+                gpio_lcd_send_byte('/', GPIO_HIGH);
+                gpio_lcd_send_byte('L', GPIO_HIGH);
+                gpio_lcd_send_byte(':', GPIO_HIGH);
+            } else if (old_speed > 0.0f && posData->obd_speed == 0.0f) {
+                gpio_lcd_send_byte(LCD_LINE_1 + 10, GPIO_LOW);
+                gpio_lcd_send_byte(32, GPIO_HIGH);
+                gpio_lcd_send_byte('L', GPIO_HIGH);
+                gpio_lcd_send_byte('/', GPIO_HIGH);
+                gpio_lcd_send_byte('H', GPIO_HIGH);
+                gpio_lcd_send_byte(':', GPIO_HIGH);
+            }
+            old_speed = posData->obd_speed;
 
-            //printf("%f |%s|\n", posData->i2c_hum, wert4);
+            strftime(wert1, 6, "%R", &tm);
+            snprintf(wert2, 6, "%4.1f", lps);
+            snprintf(wert3, 6, "%4.1f", ((float) posData->obd_volt) / 10.0f);
+            snprintf(wert4, 6, "%3.0f", posData->i2c_temp);
 
             d_f[0] += f;
             if (d_f[0] > 2000) {
@@ -1187,20 +1340,12 @@ void * thread_foss(void *esContext) {
                 for (uint_fast8_t a = 0; a < 5; a++) {
                     gpio_lcd_send_byte(wert1[a], GPIO_HIGH);
                 }
-                d_f[0] = 0;
-            }
 
-            d_f[1] += f;
-            if (d_f[1] > 5000) {
-                gpio_lcd_send_byte(LCD_LINE_1 + 17, GPIO_LOW);
+                gpio_lcd_send_byte(LCD_LINE_2 + 17, GPIO_LOW);
                 for (uint_fast8_t a = 0; a < 3; a++) {
-                    gpio_lcd_send_byte(wert2[a], GPIO_HIGH);
-                }
-                gpio_lcd_send_byte(LCD_LINE_2 + 16, GPIO_LOW);
-                for (uint_fast8_t a = 0; a < 4; a++) {
                     gpio_lcd_send_byte(wert4[a], GPIO_HIGH);
                 }
-                d_f[1] = 0;
+                d_f[0] = 0;
             }
 
             d_f[2] += f;
@@ -1216,10 +1361,15 @@ void * thread_foss(void *esContext) {
                     }
                 }
                 memcpy(&wert3_old[0], &wert3[0], 4);
+
+                gpio_lcd_send_byte(LCD_LINE_1 + 16, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 5; a++) {
+                    gpio_lcd_send_byte(wert2[a], GPIO_HIGH);
+                }
                 d_f[2] = 0;
             }
 
-        } else if (display == 1) {
+        } else if (*posData->display == 1) {
 
             snprintf(wert1, 8, "%1.1f/%1.1f", posData->obd_o21, posData->obd_o22);
             snprintf(wert2, 7, "%2.0f", posData->obd_iat);
@@ -1247,8 +1397,7 @@ void * thread_foss(void *esContext) {
 
                 d_f[0] = 0;
             }
-        } else if (display == 2) {
-            //snprintf(wert1, 2, "%1.0i", gpsData->fix_type);
+        } else if (*posData->display == 2) {
             if (gpsData->fix_type == 2) {
                 snprintf(wert1, 3, "%s", "2D");
             } else if (gpsData->fix_type == 3) {
@@ -1258,7 +1407,6 @@ void * thread_foss(void *esContext) {
             }
             snprintf(wert2, 6, "%2.0i/%2.0i", gpsData->satellites_tracked, gpsData->total_sats);
             snprintf(wert3, 5, "%4.1f", gpsData->HDOP);
-            //printf("%f %f\n",gpsData->HDOP,gpsData->PDOP);
 
             d_f[0] += f;
             if (d_f[0] > 1000) {
@@ -1285,9 +1433,10 @@ void * thread_foss(void *esContext) {
 
                 d_f[0] = 0;
             }
-        } else if (display == 3) {
-            snprintf(wert1, 6, "%4.1f", posData->i2c_angle);
+        } else if (*posData->display == 3) {
 
+            snprintf(wert1, 6, "%4.1f", posData->i2c_angle);
+            printf("%s\n", wert1);
             d_f[0] += f;
             if (d_f[0] > 1000) {
                 gpio_lcd_send_byte(LCD_LINE_1 + 2, GPIO_LOW);
@@ -1325,8 +1474,63 @@ void * thread_foss(void *esContext) {
                 d_f[0] = 0;
             }
              */
-        } else if (display == 4) {
-            //gpio_button_led(5, 0);
+        } else if (*posData->display == 4) {
+            snprintf(wert1, 7, "%5.1f", posData->obd_stft);
+            snprintf(wert2, 7, "%4.0f", posData->obd_coolant);
+            snprintf(wert3, 7, "%5.1f", posData->obd_ltft);
+
+            d_f[0] += f;
+            if (d_f[0] > 500) {
+                gpio_lcd_send_byte(LCD_LINE_1 + 5, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 5; a++) {
+                    gpio_lcd_send_byte(wert1[a], GPIO_HIGH);
+                }
+                gpio_lcd_send_byte(LCD_LINE_2 + 5, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 5; a++) {
+                    gpio_lcd_send_byte(wert3[a], GPIO_HIGH);
+                }
+
+                d_f[0] = 0;
+            }
+
+            d_f[1] += f;
+            if (d_f[1] > 1000) {
+                gpio_lcd_send_byte(LCD_LINE_1 + 16, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 5; a++) {
+                    gpio_lcd_send_byte(wert2[a], GPIO_HIGH);
+                }
+                d_f[1] = 0;
+            }
+
+        } else if (*posData->display == 5) {
+            snprintf(wert1, 7, "%2i", posData->obd_dct_count);
+            d_f[0] += f;
+            if (d_f[0] > 1000) {
+                gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
+                for (uint_fast8_t a = 0; a < 2; a++) {
+                    gpio_lcd_send_byte(wert1[a], GPIO_HIGH);
+                }
+
+                if (posData->obd_dct_count > 0) {
+                    gpio_lcd_send_byte(LCD_LINE_2, GPIO_LOW);
+                    for (uint_fast8_t a = 0; a < 4; a++) {
+                        gpio_lcd_send_byte(posData->obf_dtc1[a], GPIO_HIGH);
+                    }
+                    if (strncmp(posData->obf_dtc2, "0000", 4) != 0) {
+                        gpio_lcd_send_byte(',', GPIO_HIGH);
+                        for (uint_fast8_t a = 0; a < 4; a++) {
+                            gpio_lcd_send_byte(posData->obf_dtc2[a], GPIO_HIGH);
+                        }
+                    }
+                    if (strncmp(posData->obf_dtc3, "0000", 4) != 0) {
+                        gpio_lcd_send_byte(',', GPIO_HIGH);
+                        for (uint_fast8_t a = 0; a < 4; a++) {
+                            gpio_lcd_send_byte(posData->obf_dtc3[a], GPIO_HIGH);
+                        }
+                    }
+                }
+                d_f[0] = 0;
+            }
 
         }
         //printf("|%s|%s|%s|%s|\n", wert1, wert2, wert3, wert4);
@@ -1412,6 +1616,8 @@ void * thread_ubongo(void *esContext) {
             if (gpsData->fix_type > 1 && gpsData->PDOP < 6) {
                 gps_status[0] = 0.0f;
                 gps_status[2] = 1.0f;
+
+                //printf("%f %f\n", gpsData->longitude, gpsData->latitude);
 
                 gpsData->g_x = (gpsData->longitude + 180.0) / 360.0 * pow2Z;
                 gpsData->g_y = (1.0 - log(tan(gpsData->latitude * rad2deg) + 1.0 / cos(gpsData->latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
@@ -1543,7 +1749,7 @@ void * thread_ubongo(void *esContext) {
     return NULL;
 }
 
-#define SHIFT 3
+#define SHIFT 4
 #define DB_LVL1 "sit2d_6_lvl1.db"
 #define DB_LVL2 "sit2d_6_lvl2.db"
 #define DB_LVL3 "sit2d_6_lvl3.db"
@@ -1682,13 +1888,13 @@ void run_deta_lvl3(double x, double y) {
     int lon1 = (int) floor(x);
     int lat1 = (int) floor(y);
     int d1 = (int) floor(BR);
-    printf("%i %i\n", lon1, lat1);
+    //printf("%i %i\n", lon1, lat1);
     verts_werder_len = 0;
     tmp_index_werder_len = 0;
     tmp_farbe_werder_len = 0;
 
     snprintf(sql, 700, SQL_ABFRAGE, (lon1 - d1) >> SHIFT, (lon1 + d1) >> SHIFT, (lat1 - d1) >> SHIFT, (lat1 + d1) >> SHIFT);
-    printf("%s\n", sql);
+    //printf("%s\n", sql);
     sqlite3_exec(db_3, sql, sqc_vertex_lvl3, 0, &zErrMsg);
     if (zErrMsg != NULL) {
         printf("\n|%s|\n", zErrMsg);
@@ -1853,6 +2059,22 @@ void * thread_pinto(void *esContext) {
     int obd_serial = -1;
     enum obd_serial_status obdstatus;
     float tmp_val;
+
+    obdcmds_mode1[0x0D].target = &posData->obd_speed;
+    obdcmds_mode1[0x10].target = &posData->obd_maf;
+    obdcmds_mode1[0x06].target = &posData->obd_stft;
+    obdcmds_mode1[0x11].target = &posData->obd_throttle;
+    obdcmds_mode1[0x14].target = &posData->obd_o21;
+    obdcmds_mode1[0x15].target = &posData->obd_o22;
+    obdcmds_mode1[0x0F].target = &posData->obd_iat;
+    obdcmds_mode1[0x0E].target = &posData->obd_tia;
+    obdcmds_mode1[0x06].target = &posData->obd_stft;
+    obdcmds_mode1[0x07].target = &posData->obd_ltft;
+    obdcmds_mode1[0x05].target = &posData->obd_coolant;
+
+    unsigned int display0[] = {100000, 0x06, 0x10, 0x0D, 0x11};
+    unsigned int display1[] = {50000, 0x14, 0x15, 0x10, 0x0F, 0x0E};
+    unsigned int display4[] = {100000, 0x05, 0x06, 0x07};
 #endif
 
 #ifdef __I2C__
@@ -1878,124 +2100,98 @@ void * thread_pinto(void *esContext) {
 
     clock_gettime(CLOCK_MONOTONIC, &t1);
     while (1) {
-        usleep(200000);
-
 #ifdef __OBD__     
         //clock_gettime(CLOCK_MONOTONIC, &to1);
         if (obd_serial != -1) {
-            //clock_gettime(CLOCK_MONOTONIC, &to1);
-            snprintf(outstr, sizeof (outstr), "%s%s\0", "ATRV", "\r");
-            write(obd_serial, outstr, strlen(outstr));
 
-            nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
-            retbuf[4] = '\0';
-            sscanf(retbuf, "%f", &tmp_val);
-            posData->obd_volt = (uint8_t) (tmp_val * 10.0f);
-            //clock_gettime(CLOCK_MONOTONIC, &to2);
-            //printf("obd_U: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
+            if (*posData->display == 0) {
+                snprintf(outstr, sizeof (outstr), "%s%s", "ATRV", "\r");
+                write(obd_serial, outstr, strlen(outstr));
 
+                nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
+                retbuf[4] = '\0';
+                sscanf(retbuf, "%f", &tmp_val);
+                posData->obd_volt = (uint8_t) (tmp_val * 10.0f);
 
-            //clock_gettime(CLOCK_MONOTONIC, &to1);
-            obdstatus = getobdvalue(obd_serial, 0x0D, &tmp_val, obdcmds_mode1[0x0D].bytes_returned, obdcmds_mode1[0x0D].conv);
-            if (OBD_SUCCESS == obdstatus) {
-                posData->obd_speed = tmp_val;
+                for (uint_fast8_t a = 1; a< sizeof (display0) / sizeof (display0[0]); a++) {
+                    obdstatus = getobdvalue(obd_serial, display0[a], &tmp_val, obdcmds_mode1[display0[a]].bytes_returned, obdcmds_mode1[display0[a]].conv);
+                    if (OBD_SUCCESS == obdstatus) {
+                        *((float*) obdcmds_mode1[display0[a]].target) = tmp_val;
+                    } else {
+                        PRINTF("OBD %x fehler\n", display0[a]);
+                        *((float*) obdcmds_mode1[display0[a]].target) = 0.0f;
+                        obd_serial = -1;
+                    }
+                }
+                usleep(display0[0]);
+
+            } else if (*posData->display == 1) {
+                for (uint_fast8_t a = 1; a< sizeof (display1) / sizeof (display1[0]); a++) {
+                    obdstatus = getobdvalue(obd_serial, display1[a], &tmp_val, obdcmds_mode1[display1[a]].bytes_returned, obdcmds_mode1[display1[a]].conv);
+                    if (OBD_SUCCESS == obdstatus) {
+                        *((float*) obdcmds_mode1[display1[a]].target) = tmp_val;
+                    } else {
+                        PRINTF("OBD %x fehler\n", display1[a]);
+                        *((float*) obdcmds_mode1[display1[a]].target) = 0.0f;
+                        obd_serial = -1;
+                    }
+                }
+                usleep(display1[0]);
+            } else if (*posData->display == 4) {
+                for (uint_fast8_t a = 1; a< sizeof (display4) / sizeof (display4[0]); a++) {
+                    obdstatus = getobdvalue(obd_serial, display4[a], &tmp_val, obdcmds_mode1[display4[a]].bytes_returned, obdcmds_mode1[display4[a]].conv);
+                    if (OBD_SUCCESS == obdstatus) {
+                        *((float*) obdcmds_mode1[display4[a]].target) = tmp_val;
+                    } else {
+                        PRINTF("OBD %x fehler\n", display4[a]);
+                        *((float*) obdcmds_mode1[display4[a]].target) = 0.0f;
+                        obd_serial = -1;
+                    }
+                }
+                usleep(display4[0]);
+            } else if (*posData->display == 5) {
+
+                /*snprintf(outstr, sizeof (outstr), "%s%s", "0101", "\r");
+                write(obd_serial, outstr, strlen(outstr));
+                nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
+                printf("%s\n", retbuf);
+                retbuf[6] = '\0';
+                sscanf(&retbuf[4], "%x", &posData->obd_dct_count);
+                posData->obd_dct_count -= 0x80;
+                 */
+                //if (posData->obd_dct_count > 0) {
+                snprintf(outstr, sizeof (outstr), "%s%s%c", "03", "\r", '\0');
+                write(obd_serial, outstr, strlen(outstr));
+                nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
+
+                //printf("%s\n", retbuf);
+
+                if (strncmp(retbuf, "BUS INIT: ERROR", 15) != 0) {
+                    memcpy(posData->obf_dtc1, &retbuf[2], 4);
+                    memcpy(posData->obf_dtc2, &retbuf[6], 4);
+                    memcpy(posData->obf_dtc3, &retbuf[10], 4);
+                } else {
+                    memset(posData->obf_dtc1, 0, 4);
+                    memset(posData->obf_dtc2, 0, 4);
+                    memset(posData->obf_dtc3, 0, 4);
+                }
+
+                unsigned int asd = 0;
+                if (strncmp(posData->obf_dtc1, "0000", 4) == 0) {
+                    asd++;
+                    if (strncmp(posData->obf_dtc2, "0000", 4) == 0) {
+                        asd++;
+                        if (strncmp(posData->obf_dtc3, "0000", 4) == 0) {
+                            asd++;
+                        }
+                    }
+                }
+                posData->obd_dct_count = asd;
+
+                usleep(2000000);
             } else {
-                PRINTF("OBD 0x0D fehler\n");
-                obd_serial = -1;
+                usleep(500000);
             }
-            //clock_gettime(CLOCK_MONOTONIC, &to2);
-            //printf("obd_V: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
-
-
-            /*clock_gettime(CLOCK_MONOTONIC, &to1);
-            int sendbuflen = snprintf(outstr, sizeof (outstr), "%s%s\0", "0105", "\r");
-            
-            if (write(obd_serial, outstr, sendbuflen) < sendbuflen) {
-                printf("OBD_ERROR\n");
-            }
-            nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
-
-            printf("->|%c%c%c%c%c%c|\n", retbuf[0], retbuf[1], retbuf[2], retbuf[3], retbuf[4], retbuf[5]);
-            clock_gettime(CLOCK_MONOTONIC, &to2);
-            printf("obd_C: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
-             */
-
-            //clock_gettime(CLOCK_MONOTONIC, &to1);
-            /*obdstatus = getobdvalue(obd_serial, 0x05, &tmp_val, obdcmds_mode1[0x05].bytes_returned, obdcmds_mode1[0x05].conv);
-            if (OBD_SUCCESS == obdstatus) {
-                posData->obd_coolant = tmp_val;
-            } else {
-                PRINTF("OBD 0x05 fehler\n");
-                obd_serial = -1;
-            }*/
-            //clock_gettime(CLOCK_MONOTONIC, &to2);
-            //printf("obd_C: %lims %f\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000, posData->obd_coolant);
-
-            if (even & 1) {
-                //clock_gettime(CLOCK_MONOTONIC, &to1);
-                obdstatus = getobdvalue(obd_serial, 0x10, &tmp_val, obdcmds_mode1[0x10].bytes_returned, obdcmds_mode1[0x10].conv);
-                if (OBD_SUCCESS == obdstatus) {
-                    posData->obd_maf = tmp_val;
-                } else {
-                    PRINTF("OBD 0x10 fehler\n");
-                    obd_serial = -1;
-                }
-                //clock_gettime(CLOCK_MONOTONIC, &to2);
-                //printf("obd_MAF: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
-
-                //clock_gettime(CLOCK_MONOTONIC, &to1);
-                obdstatus = getobdvalue(obd_serial, 0x0F, &tmp_val, obdcmds_mode1[0x0F].bytes_returned, obdcmds_mode1[0x0F].conv);
-                if (OBD_SUCCESS == obdstatus) {
-                    posData->obd_iat = tmp_val;
-                } else {
-                    PRINTF("OBD 0x0F fehler\n");
-                    obd_serial = -1;
-                }
-                //clock_gettime(CLOCK_MONOTONIC, &to2);
-                //printf("obd_IAT: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
-
-                //clock_gettime(CLOCK_MONOTONIC, &to1);
-                obdstatus = getobdvalue(obd_serial, 0x14, &tmp_val, obdcmds_mode1[0x14].bytes_returned, obdcmds_mode1[0x14].conv);
-                if (OBD_SUCCESS == obdstatus) {
-                    posData->obd_o21 = tmp_val;
-                } else {
-                    PRINTF("OBD 0x14 fehler\n");
-                    obd_serial = -1;
-                }
-                //clock_gettime(CLOCK_MONOTONIC, &to2);
-                //printf("obd_o21: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
-
-                //clock_gettime(CLOCK_MONOTONIC, &to1);
-                obdstatus = getobdvalue(obd_serial, 0x15, &tmp_val, obdcmds_mode1[0x15].bytes_returned, obdcmds_mode1[0x15].conv);
-                if (OBD_SUCCESS == obdstatus) {
-                    posData->obd_o22 = tmp_val;
-                } else {
-                    PRINTF("OBD 0x15 fehler\n");
-                    obd_serial = -1;
-                }
-                //clock_gettime(CLOCK_MONOTONIC, &to2);
-                //printf("obd_O22: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
-
-                //clock_gettime(CLOCK_MONOTONIC, &to1);
-                /*obdstatus = getobdvalue(obd_serial, 0x0C, &tmp_val, obdcmds_mode1[0x0C].bytes_returned, obdcmds_mode1[0x0C].conv);
-                if (OBD_SUCCESS == obdstatus) {
-                    posData->obd_rpm = tmp_val;
-                } else {
-                    PRINTF("OBD: fehler: \n");
-                }*/
-                //clock_gettime(CLOCK_MONOTONIC, &to2);
-                //printf("obd_RPM: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
-
-                //clock_gettime(CLOCK_MONOTONIC, &to1);
-                obdstatus = getobdvalue(obd_serial, 0x0E, &tmp_val, obdcmds_mode1[0x0E].bytes_returned, obdcmds_mode1[0x0E].conv);
-                if (OBD_SUCCESS == obdstatus) {
-                    posData->obd_tia = tmp_val;
-                } else {
-                    PRINTF("OBD: fehler: \n");
-                }
-            }
-            //clock_gettime(CLOCK_MONOTONIC, &to2);
-            //printf("obd_TIA: %lims\n", (to2.tv_sec - to1.tv_sec) * 1000 + (to2.tv_nsec - to1.tv_nsec) / 1000000);
         } else {
             if (obd_serial != -1) {
                 close(obd_serial);
@@ -2279,7 +2475,7 @@ void ShutDown(int signum) {
     exit(EXIT_SUCCESS);
 }
 
-void test(ESContext *esContext) {
+void test(ESContext * esContext) {
     UserData *userData = ((ESContext*) esContext)->userData;
     POS_T *posData = ((ESContext*) esContext)->posData;
 
@@ -2502,7 +2698,7 @@ int main(int argc, char *argv[]) {
     //
     //pthread_create(&thread_id3, NULL, &thread_deta_lvl1, (void*) &esContext);
     //pthread_create(&thread_id4, NULL, &thread_deta_lvl2, (void*) &esContext);
-    //pthread_create(&thread_id5, NULL, &thread_deta_lvl3, (void*) &esContext);
+    pthread_create(&thread_id5, NULL, &thread_deta_lvl3, (void*) &esContext);
     pthread_create(&thread_id6, NULL, &thread_ubongo, (void*) &esContext);
 
     thread_render(&esContext);
