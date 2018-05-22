@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <inttypes.h>
 
 #define GPIO_IN  0
 #define GPIO_OUT 1
@@ -22,15 +23,17 @@
 
 #define LCD_LINE_1  0x80    
 #define LCD_LINE_2  0xC0 
-#define E_PULSE  5
-#define E_DELAY  5
+#define E_PULSE  4
+#define E_DELAY  4
 
 int bl_write(char *value);
-void delay(unsigned long millis);
 void gpio_init();
 void gpio_lcd_send_byte(char bits, char *mode);
 void gpio_lcd_init();
-
+void gpio_get_button(unsigned int *button);
+void gpio_set_lcd_maske(uint_fast8_t display, float *speed);
+void gpio_button_led(uint_fast8_t port, uint_fast8_t mode);
+void gpio_lcd_shutdown(void);
 
 #endif /* GPIO_H */
 

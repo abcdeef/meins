@@ -22,14 +22,20 @@
 
 typedef struct {
     int status;
-    int fix_quality;
-    int fix_type;
+    uint8_t fix_quality;
+    uint8_t fix_type;
+    int satellites_tracked;
+    int total_sats;
     float PDOP;
+    float HDOP;
     double longitude;
     double latitude;
     time_t stamp;
     //struct tm tm;
     float angle;
+    float speed;
+    double g_x;
+    double g_y;
 } GPS_T;
 
 enum minmea_sentence_id {

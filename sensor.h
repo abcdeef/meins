@@ -11,3 +11,5 @@ enum e_i2c_status {
 
 enum e_i2c_status sensor_hum_init(int * file);
 enum e_i2c_status sensor_hum_read(int *file, float *humidity, float *cTemp);
+enum e_i2c_status senseHat_init(int * sock, char * filename);
+enum e_i2c_status senseHat_read(int *file, float *humidity, float *cTemp, float *cAngle);

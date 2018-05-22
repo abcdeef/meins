@@ -30,6 +30,9 @@ float lat2offsetY(double lat, int z, int scale);
 void printBin(unsigned char *CH);
 void write_png_file(char* file_name, int width, int height, char *row_pointers);
 void writeBMP(unsigned char *dst, unsigned int width, unsigned height);
-
+int delay(unsigned long millis);
+int32_t fp32(double value, int8_t Q);
+int64_t fp64(double value, int8_t Q);
+double pf32(int32_t value, int8_t Q);
 #endif /* UTIL_H */
 

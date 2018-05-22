@@ -44,6 +44,10 @@ float buttons[] = {
     -0.02f, -0.03f, 0.0f, 0.0f,
     0.0f, -0.01f, 0.0f, 1.0f,
     0.02f, -0.03f, 1.0f, 0.0f,
+    -GPS_I_R / 4, +GPS_I_R / 4, 0.0f, 1.0f,
+    -GPS_I_R / 4, -GPS_I_R / 4, 0.0f, 0.0f,
+    +GPS_I_R / 4, +GPS_I_R / 4, 1.0f, 1.0f,
+    +GPS_I_R / 4, -GPS_I_R / 4, 1.0f, 0.0f,
 };
 
 unsigned short auto_tex = ROT;
