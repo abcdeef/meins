@@ -67,6 +67,7 @@ typedef struct _escontext {
     /// Callbacks
     void (ESCALLBACK *drawFunc)(struct _escontext *);
     void (ESCALLBACK *keyFunc)(struct _escontext *, unsigned char, int, int);
+    void (ESCALLBACK *buttonFunc)(struct _escontext *, int, int);
     void (ESCALLBACK *updateFunc)(struct _escontext *, float deltaTime);
 
 } ESContext;
@@ -108,21 +109,21 @@ GLboolean ESUTIL_API esCreateWindow(ESContext *esContext, const char *title, GLi
 /// \param esContext Application context
 /// \param drawFunc Draw callback function that will be used to render the scene
 //
-void ESUTIL_API esRegisterDrawFunc(ESContext *esContext, void (ESCALLBACK *drawFunc)(ESContext*));
+//void ESUTIL_API esRegisterDrawFunc(ESContext *esContext, void (ESCALLBACK *drawFunc)(ESContext*));
 
 //
 /// \brief Register an update callback function to be used to update on each time step
 /// \param esContext Application context
 /// \param updateFunc Update callback function that will be used to render the scene
 //
-void ESUTIL_API esRegisterUpdateFunc(ESContext *esContext, void (ESCALLBACK *updateFunc)(ESContext*, float));
+//void ESUTIL_API esRegisterUpdateFunc(ESContext *esContext, void (ESCALLBACK *updateFunc)(ESContext*, float));
 
 //
 /// \brief Register an keyboard input processing callback function
 /// \param esContext Application context
 /// \param keyFunc Key callback function for application processing of keyboard input
 //
-void ESUTIL_API esRegisterKeyFunc(ESContext *esContext, void (ESCALLBACK *drawFunc)(ESContext*, unsigned char, int, int));
+//void ESUTIL_API esRegisterKeyFunc(ESContext *esContext, void (ESCALLBACK *drawFunc)(ESContext*, unsigned char, int, int));
 //
 /// \brief Log a message to the debug output for the platform
 /// \param formatStr Format string for error log.  
