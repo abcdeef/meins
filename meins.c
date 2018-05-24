@@ -112,7 +112,13 @@ typedef struct {
 } T_V_E;
 
 #define V_Z_DEFAULT 1.2f
+
+#ifdef __RASPI__
 float BR = 4.0f;
+#else
+float BR = 6.0f;
+#endif
+
 float T_Y = V_Z_DEFAULT;
 float ORTHO = 2.0f;
 
@@ -532,6 +538,7 @@ int Init(ESContext *esContext) {
     }
 
     glViewport(0, -160, 800, 800);
+    //glViewport(0, 0, 800, 480);
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 
     esMatrixLoadIdentity(&perspective);
@@ -758,6 +765,7 @@ void Update(ESContext *esContext, float deltaTime) {
         glDrawElements(GL_TRIANGLES, farbe_werder[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe_werder[m_n].index));
     }
 
+    ///////////////// DEBUG
     float color[] = {
         1.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f,
@@ -799,6 +807,7 @@ void Update(ESContext *esContext, float deltaTime) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
 
+#ifdef __RASPI__
     // GUI
     glUseProgram(userData->programGUI);
     glActiveTexture(GL_TEXTURE0);
@@ -828,6 +837,12 @@ void Update(ESContext *esContext, float deltaTime) {
     glUniform3f(userData->colorLocKreis, gps_status[0], gps_status[1], gps_status[2]);
     glDrawArrays(GL_TRIANGLE_STRIP, 15, 4);
     PRINTGLERROR
+#endif
+}
+
+void Button(ESContext *esContext, int x, int y) {
+    POS_T *posData = esContext->posData;
+
 }
 
 void Key(ESContext *esContext, unsigned char a, int b, int c) {
@@ -836,60 +851,70 @@ void Key(ESContext *esContext, unsigned char a, int b, int c) {
     uint l = 0;
 
     //printf("%i\n", a);
+    if (a == 86) {
+        a = 35;
+    }
+    if (a == 82) {
+        a = 61;
+    }
+    if (a == 80) {
+        a = 111;
+    }
+    if (a == 83) {
+        a = 113;
+    }
+    if (a == 88) {
+        a = 116;
+    }
+    if (a == 85) {
+        a = 114;
+    }
     switch (a) {
-        case 114:
-            verts_len = 0;
-            //loadVert(posData->g_x, posData->g_y, BR);
-
-
-            break;
-        case 53:
+        case 84:
             if (gui_mode == _2D_) {
                 posData->o_x = 0.0f;
                 posData->o_y = 0.0f;
             }
             break;
-        case 56:
+        case 111:
             if (gui_mode == _2D_) {
                 posData->o_y += 0.1f;
             }
             break;
-        case 50:
+        case 116:
             if (gui_mode == _2D_) {
                 posData->o_y -= 0.1f;
             }
             break;
-        case 52:
+        case 113:
             if (gui_mode == _2D_) {
                 posData->o_x -= 0.1f;
-                //printf("%f\n", posData->o_x);
-                //run_deta_lvl3(gpsData->g_x + posData->o_x, gpsData->g_y - posData->o_y);
             }
             break;
-        case 54:
+        case 114:
             if (gui_mode == _2D_) {
                 posData->o_x += 0.1f;
             }
             break;
-        case 55:
+        case 79:
             if (gui_mode == _2D_) {
                 posData->o_x -= 0.1f;
                 posData->o_y += 0.1f;
             }
             break;
-        case 57:
+        case 81:
             if (gui_mode == _2D_) {
                 posData->o_x += 0.1f;
                 posData->o_y += 0.1f;
             }
             break;
-        case 51:
+        case 89:
             if (gui_mode == _2D_) {
                 posData->o_x += 0.1f;
                 posData->o_y -= 0.1f;
             }
             break;
-        case 49:
+        case 87:
             if (gui_mode == _2D_) {
                 posData->o_x -= 0.1f;
                 posData->o_y -= 0.1f;
@@ -917,14 +942,14 @@ void Key(ESContext *esContext, unsigned char a, int b, int c) {
             }
             PRINTF("angle: %f\n", posData->angle);
             break;
-        case 45:
+        case 61:
             if (ORTHO < 10.0) {
                 ORTHO += 1.0f;
                 esMatrixLoadIdentity(&perspective);
                 esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
             }
             break;
-        case 43:
+        case 35:
             if (ORTHO > 1.0) {
                 ORTHO -= 1.0f;
                 esMatrixLoadIdentity(&perspective);
@@ -1111,7 +1136,7 @@ void * thread_foss(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
-    struct timespec spec0, spec1, asd;
+    struct timespec spec0, spec1;
     uint_fast8_t display0[] = {0, 2, 3}, display1[] = {1, 4, 5};
     uint_fast8_t display0_c = 0, display1_c = 0;
     posData->display = &display0[display0_c];
@@ -1589,10 +1614,11 @@ void * thread_ubongo(void *esContext) {
     printf(" = %zibyte\n", max_len);
     printf("\n");
 
-    sleep(10);
+    sleep(2);
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
     while (1) {
+        //printf("asd\n");
         old_g_x = gpsData->g_x;
         old_g_y = gpsData->g_y;
 
@@ -1838,45 +1864,61 @@ void * thread_deta_lvl1(void *esContext) {
     return NULL;
 }
 
-void * thread_deta_lvl2(void *esContext) {
-    POS_T *posData = ((ESContext*) esContext)->posData;
-    PRINTF("\rdeta_lvl2 gestartet\n");
-
-    struct timespec spec0, spec1;
-
+void run_deta_lvl2(double x, double y) {
     char sql[700];
     char *zErrMsg = 0;
     int lon1, lat1, d1;
 
+    lon1 = (int) floor(x);
+    lat1 = (int) floor(y);
+    d1 = (int) floor(BR);
+
+    verts_yama_len = 0;
+    tmp_index_yama_len = 0;
+    tmp_farbe_yama_len = 0;
+
+    snprintf(sql, 700, SQL_ABFRAGE, (lon1 - d1) >> SHIFT, (lon1 + d1) >> SHIFT, (lat1 - d1) >> SHIFT, (lat1 + d1) >> SHIFT);
+    //printf("\r%s\n", sql);
+    sqlite3_exec(db_2, sql, sqc_vertex_lvl2, 0, &zErrMsg);
+    if (zErrMsg != NULL) {
+        printf("\n|%s|\n", zErrMsg);
+    }
+
+    pthread_mutex_lock(&mutex_deto_lvl2);
+    farbe_yama_len = tmp_farbe_yama_len;
+    index_yama_len = tmp_index_yama_len;
+    memcpy(farbe_yama, tmp_farbe_yama, tmp_farbe_yama_len * sizeof (T_V_E));
+    memcpy(index_yama, tmp_index_yama, tmp_index_yama_len * sizeof (unsigned short));
+    new_tex_lvl2 = 1;
+    pthread_mutex_unlock(&mutex_deto_lvl2);
+}
+
+void * thread_deta_lvl2(void *esContext) {
+    POS_T *posData = ((ESContext*) esContext)->posData;
+
+    sleep(1);
+    PRINTF("\rdeta_lvl2 gestartet\n");
+
+#ifdef __DEBUG__
+    struct timespec spec0, spec1;
+#endif
+
     while (1) {
+#ifdef __DEBUG__
         clock_gettime(CLOCK_MONOTONIC, &spec0);
+#endif
+        run_deta_lvl2(posData->g_x + posData->o_x, posData->g_y - posData->o_y);
 
-        lon1 = (int) floor(posData->g_x);
-        lat1 = (int) floor(posData->g_y);
-        d1 = (int) floor(BR);
-
-        verts_yama_len = 0;
-        tmp_index_yama_len = 0;
-        tmp_farbe_yama_len = 0;
-
-        snprintf(sql, 700, SQL_ABFRAGE, (lon1 - d1) >> SHIFT, (lon1 + d1) >> SHIFT, (lat1 - d1) >> SHIFT, (lat1 + d1) >> SHIFT);
-        //printf("\r%s\n", sql);
-        sqlite3_exec(db_2, sql, sqc_vertex_lvl2, 0, &zErrMsg);
-        if (zErrMsg != NULL) {
-            printf("\n|%s|\n", zErrMsg);
-        }
-
-        pthread_mutex_lock(&mutex_deto_lvl2);
-        farbe_yama_len = tmp_farbe_yama_len;
-        index_yama_len = tmp_index_yama_len;
-        memcpy(farbe_yama, tmp_farbe_yama, tmp_farbe_yama_len * sizeof (T_V_E));
-        memcpy(index_yama, tmp_index_yama, tmp_index_yama_len * sizeof (unsigned short));
-        new_tex_lvl2 = 1;
-        pthread_mutex_unlock(&mutex_deto_lvl2);
-
+#ifdef __DEBUG__
         printf("deta_lvl2: ");
         TM(spec0, spec1)
-        usleep(10000000);
+#endif
+
+#ifdef __RASPI__
+                usleep(10000000);
+#else
+                usleep(1000000);
+#endif
     }
     return NULL;
 }
@@ -1923,20 +1965,31 @@ void run_deta_lvl3(double x, double y) {
 
 void * thread_deta_lvl3(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
-    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
-
-    PRINTF("\rdeta_lvl3 gestartet\n");
-    struct timespec spec0, spec1;
 
     sleep(1);
+    PRINTF("\rdeta_lvl3 gestartet\n");
+
+#ifdef __DEBUG__
+    struct timespec spec0, spec1;
+#endif
+
 
     while (1) {
+#ifdef __DEBUG__
         clock_gettime(CLOCK_MONOTONIC, &spec0);
-        run_deta_lvl3(posData->g_x + posData->o_x, posData->g_y);
+#endif
+        run_deta_lvl3(posData->g_x + posData->o_x, posData->g_y - posData->o_y);
 
+#ifdef __DEBUG__
         printf("deta_lvl3: ");
         TM(spec0, spec1)
-        usleep(3000000);
+#endif
+
+#ifdef __RASPI__
+                usleep(3000000);
+#else
+                usleep(1000000);
+#endif
     }
 
     return NULL;
@@ -2664,7 +2717,7 @@ int main(int argc, char *argv[]) {
     assert(sqlite3_config(SQLITE_CONFIG_PAGECACHE, &sqlite_cache_2[0], SZ, PAGES) == SQLITE_OK);
 
     sqlite3_initialize();
-    //assert(sqlite3_open_v2(HOME DB_LVL1, &db_1, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
+    assert(sqlite3_open_v2(HOME DB_LVL1, &db_1, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
     assert(sqlite3_open_v2(HOME DB_LVL2, &db_2, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
     assert(sqlite3_open_v2(HOME DB_LVL3, &db_3, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
 
@@ -2681,23 +2734,16 @@ int main(int argc, char *argv[]) {
 
 
 #ifndef __RASPI__
-    esRegisterKeyFunc(&esContext, Key);
+    esContext.keyFunc = Key;
+    esContext.buttonFunc = Button;
 #else
     pthread_create(&thread_id1, NULL, &thread_foss, (void*) &esContext);
     pthread_create(&thread_id2, NULL, &thread_pinto, (void*) &esContext);
     pthread_create(&thread_id3, NULL, &thread_jolla, (void*) &esContext);
 #endif
 
-    //
-    //thread_deta_lvl3(&esContext);
-    //test(&esContext);
-
-    //posData.g_x = 139555.26674;
-    //posData.g_y = 86529.64129;
-
-    //
     //pthread_create(&thread_id3, NULL, &thread_deta_lvl1, (void*) &esContext);
-    //pthread_create(&thread_id4, NULL, &thread_deta_lvl2, (void*) &esContext);
+    pthread_create(&thread_id4, NULL, &thread_deta_lvl2, (void*) &esContext);
     pthread_create(&thread_id5, NULL, &thread_deta_lvl3, (void*) &esContext);
     pthread_create(&thread_id6, NULL, &thread_ubongo, (void*) &esContext);
 
