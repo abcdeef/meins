@@ -173,6 +173,8 @@ void run_deta_lvl3(double x, double y);
 void printM4(ESMatrix *wg);
 void ShutDown(int signum);
 
+double getDegrees(double lat1, double lon1, double lat2, double lon2);
+
 //#define V_KORR 1.7f
 
 double mf;
@@ -333,6 +335,9 @@ typedef struct {
     // Festkomma g_x/g_y Ersatz
     int gi_x[2];
     int gi_y[2];
+
+    // Geshcwindigkeitsvektor aktuelle Route
+    double V[2];
 } POS_T;
 
 void DoubletoFix(double *a, int *ret) {
@@ -656,12 +661,20 @@ void Update(ESContext *esContext, float deltaTime) {
     esMatrixMultiply(&mvpMatrix, &modelview, &perspective);
 #endif
 
-    //printf("%f\n", posData->v);
-    //posData->v_x = sinf(mAngle) * posData->v;
-    //posData->v_y = cosf(mAngle) * posData->v;
+    double a = sqrt(pow(posData->obd_speed, 2.0) / (pow(posData->V[0], 2.0) + pow(posData->V[1], 2.0)));
+
+    posData->v_x = a * posData->V[0];
+    posData->v_y = -a * posData->V[1];
+
+    if (posData->v_x != posData->v_x) {
+        posData->v_x = 0.0f;
+        posData->v_y = 0.0f;
+    }
 
     posData->g_x += deltaTime * posData->v_x / 3600.0f / posData->osmS;
     posData->g_y -= deltaTime * posData->v_y / 3600.0f / posData->osmS;
+
+    //printf("%f %f %f %f %f\n", a, posData->V[0], posData->V[1], posData->v_x, posData->v_y);
 
     double g_x = posData->g_x + posData->o_x;
     double g_y = posData->g_y - posData->o_y;
@@ -1118,10 +1131,10 @@ void initPOS(ESContext * esContext) {
         for (int a = 0; a< sizeof (io_eigenschaften) / sizeof (T_IO); a++) {
             fread(io_eigenschaften[a].val, io_eigenschaften[a].len, 1, eigenschaften);
         }
-        /*posData->gps_file++;
+        posData->gps_file++;
         fseek(eigenschaften, 28, SEEK_SET);
         fwrite(io_eigenschaften[4].val, io_eigenschaften[4].len, 1, eigenschaften);
-        fflush(eigenschaften);*/
+        fflush(eigenschaften);
     }
 
     DoubletoFix(&posData->g_x, posData->gi_x);
@@ -1359,6 +1372,7 @@ void * thread_foss(void *esContext) {
             snprintf(wert3, 6, "%4.1f", ((float) posData->obd_volt) / 10.0f);
             snprintf(wert4, 6, "%3.0f", posData->i2c_temp);
 
+
             d_f[0] += f;
             if (d_f[0] > 2000) {
                 gpio_lcd_send_byte(LCD_LINE_1, GPIO_LOW);
@@ -1570,8 +1584,10 @@ void * thread_ubongo(void *esContext) {
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     struct timespec t1, t2;
+#ifdef __GPS__
     int gpsd_init = -1;
-    double old_g_x, old_g_y, dist;
+#endif
+    double old_g_x, old_g_y, dist, old_latitude, old_longitude;
     size_t max_len = 0;
     float deg;
     int64_t gi_x, gi_y;
@@ -1591,6 +1607,8 @@ void * thread_ubongo(void *esContext) {
         {&gpsData->fix_type, sizeof (gpsData->fix_type)},
         {&gpsData->g_x, sizeof (double)},
         {&gpsData->g_y, sizeof (double)},
+        {&gpsData->longitude, sizeof (double)},
+        {&gpsData->latitude, sizeof (double)},
         {&gi_x, sizeof (int64_t)},
         {&gi_y, sizeof (int64_t)},
         {&dist, sizeof (double)},
@@ -1622,6 +1640,9 @@ void * thread_ubongo(void *esContext) {
         old_g_x = gpsData->g_x;
         old_g_y = gpsData->g_y;
 
+        old_latitude = gpsData->latitude;
+        old_longitude = gpsData->longitude;
+
 #ifdef __SENSOR_HUM__
         if (i2c_init != -1) {
             i2c_status = senseHat_read(&i2c_init, &i2c_hum, &i2c_temp, &i2c_angle);
@@ -1649,6 +1670,7 @@ void * thread_ubongo(void *esContext) {
                 gpsData->g_y = (1.0 - log(tan(gpsData->latitude * rad2deg) + 1.0 / cos(gpsData->latitude * rad2deg)) / M_PI) / 2.0 * pow2Z;
 
                 dist = sqrt(pow(old_g_x - gpsData->g_x, 2) + pow(old_g_y - gpsData->g_y, 2)) * posData->osmS;
+                deg = getDegrees(gpsData->latitude, gpsData->longitude, old_latitude, old_longitude);
             } else {
                 gps_status[0] = 1.0f;
                 gps_status[2] = 0.0f;
@@ -1670,14 +1692,15 @@ void * thread_ubongo(void *esContext) {
             gpsData->stamp = stamp;
             gps_status[0] = 0.0f;
             gps_status[2] = 1.0f;
-            //printf("%i: %f\n", counter, deg);
 
-            //if (counter != 98) {
-            //    continue;
-            //}
+            //double V2[2] = {gpsData->g_x - old_g_x, -(gpsData->g_y - old_g_y)};
+
+
+            //printf("%u: %f %f %f %f\n", counter, gpsData->g_x, old_g_x, gpsData->g_y, old_g_y);
 
             usleep(deltatime * 1000);
         } else {
+#ifdef __RASPI__
             stamp = gpsData->stamp;
             gi_x = fp64(gpsData->g_x, 32);
             gi_y = fp64(gpsData->g_y, 32);
@@ -1685,7 +1708,7 @@ void * thread_ubongo(void *esContext) {
                 fwrite(io_gio[a].val, io_gio[a].len, 1, gps_out);
             }
             fflush(gps_out);
-
+#endif
             usleep(300000); // 300ms
         }
         fseek(eigenschaften, 0, SEEK_SET);
@@ -1730,6 +1753,7 @@ void * thread_ubongo(void *esContext) {
                 old_hc = hc;
             }
         }
+
         if (ret != -1) {
             double A[2] = {route[ret - 1].g_x, route[ret - 1].g_y};
             double B[2] = {route[ret].g_x, route[ret].g_y};
@@ -1750,23 +1774,28 @@ void * thread_ubongo(void *esContext) {
 
             double alpha = acos((AB[0] * V[0] + AB[1] * V[1]) / (sqrt(c) * sqrt(pow(V[0], 2.0) + pow(V[1], 2.0)))) * 180.0f / M_PI;
 
+            posData->V[0] = (alpha > 90.0f) ? -1.0 * AB[0] : AB[0];
+            posData->V[1] = (alpha > 90.0f) ? -1.0 * AB[1] : AB[1];
 
-            V[0] = (alpha > 90.0f) ? -1.0 * AB[0] : AB[0];
-            V[1] = (alpha > 90.0f) ? -1.0 * AB[1] : AB[1];
+            //posData->angle = acos((0.0f * posData->V[0] + 1.0f * posData->V[1]) / (1.0f * sqrt(pow(posData->V[0], 2.0) + pow(posData->V[1], 2.0)))) * 180.0f / M_PI;
 
-            posData->angle = acos((0.0f * V[0] + 1.0f * V[1]) / (1.0f * sqrt(pow(V[0], 2.0) + pow(V[1], 2.0)))) * 180.0f / M_PI;
-            //printf("[%f, %f] [%f, %f] %f %f\n", AB[0], AB[1], V[0], V[1], posData->angle, posData->obd_speed);
+            //double a = sqrt(pow(posData->obd_speed, 2.0) / (pow(posData->V[0], 2.0) + pow(posData->V[1], 2.0)));
 
-            double a = sqrt(pow(posData->obd_speed, 2.0) / (pow(V[0], 2.0) + pow(V[1], 2.0)));
+            //posData->v_x = a * V[0];
+            //posData->v_y = -a * V[1];
 
-            posData->v_x = a * V[0];
-            posData->v_y = -a * V[1];
+
+            //if ((V[0] != 0.0) || (V[1] != 0.0)) {
+            //deg = acos(V[1] / (sqrt(pow(V[0], 2.0) + pow(V[1], 2.0)))) * 180.0 / M_PI;
+
+            //}
         } else {
             posData->g_x = gpsData->g_x;
             posData->g_y = gpsData->g_y;
             //printf("%f %f\n", posData->g_x, posData->g_y);
         }
-
+        //posData->g_x = gpsData->g_x;
+        //posData->g_y = gpsData->g_y;
         //printf("%f %f\n", posData->g_x, posData->g_y);
         //printf("############################\n");
         //printf("####7\n");
@@ -2021,19 +2050,17 @@ void * thread_jolla(void *esContext) {
 
         if (finish == 1) {
             if (rawX > 710 && rawX < 750 && rawY > 430 && rawY < 480) {
-                /*if (*ZOOM > 8) {
-                    ZOOM++;
-                    PRINTF("ZOOM: %i\n", *ZOOM);
-                    setPOS(esContext);
-                    PRINTF("jolla: %i/%i %i/%i\n", posData->t_x, posData->gpu_t_x, posData->t_y, posData->gpu_t_y);
-                }*/
+                if (ORTHO > 1.0) {
+                    ORTHO -= 1.0f;
+                    esMatrixLoadIdentity(&perspective);
+                    esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
+                }
             } else if (rawX > 760 && rawX < 800 && rawY > 430 && rawY < 480) {
-                /*if (*ZOOM < 18) {
-                    ZOOM--;
-                    PRINTF("ZOOM: %i\n", *ZOOM);
-                    setPOS(esContext);
-                    PRINTF("jolla: %i/%i %i/%i\n", posData->t_x, posData->gpu_t_x, posData->t_y, posData->gpu_t_y);
-                }*/
+                if (ORTHO > 1.0) {
+                    ORTHO -= 1.0f;
+                    esMatrixLoadIdentity(&perspective);
+                    esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
+                }
             }
         }
     }
@@ -2125,7 +2152,7 @@ void * thread_pinto(void *esContext) {
     obdcmds_mode1[0x07].target = &posData->obd_ltft;
     obdcmds_mode1[0x05].target = &posData->obd_coolant;
 
-    unsigned int display0[] = {100000, 0x06, 0x10, 0x0D, 0x11};
+    unsigned int display0[] = {100000, 0x06, 0x10, 0x11};
     unsigned int display1[] = {50000, 0x14, 0x15, 0x10, 0x0F, 0x0E};
     unsigned int display4[] = {100000, 0x05, 0x06, 0x07};
 #endif
@@ -2157,15 +2184,23 @@ void * thread_pinto(void *esContext) {
         //clock_gettime(CLOCK_MONOTONIC, &to1);
         if (obd_serial != -1) {
 
+            obdstatus = getobdvalue(obd_serial, 0x0D, &tmp_val, obdcmds_mode1[0x0D].bytes_returned, obdcmds_mode1[0x0D].conv);
+            if (OBD_SUCCESS == obdstatus) {
+                *((float*) obdcmds_mode1[0x0D].target) = tmp_val;
+            } else {
+                PRINTF("OBD %x fehler\n", 0x0D);
+                *((float*) obdcmds_mode1[0x0D].target) = 0.0f;
+                obd_serial = -1;
+            }
+            snprintf(outstr, sizeof (outstr), "%s%s", "ATRV", "\r");
+            write(obd_serial, outstr, strlen(outstr));
+
+            nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
+            retbuf[4] = '\0';
+            sscanf(retbuf, "%f", &tmp_val);
+            posData->obd_volt = (uint8_t) (tmp_val * 10.0f);
+
             if (*posData->display == 0) {
-                snprintf(outstr, sizeof (outstr), "%s%s", "ATRV", "\r");
-                write(obd_serial, outstr, strlen(outstr));
-
-                nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
-                retbuf[4] = '\0';
-                sscanf(retbuf, "%f", &tmp_val);
-                posData->obd_volt = (uint8_t) (tmp_val * 10.0f);
-
                 for (uint_fast8_t a = 1; a< sizeof (display0) / sizeof (display0[0]); a++) {
                     obdstatus = getobdvalue(obd_serial, display0[a], &tmp_val, obdcmds_mode1[display0[a]].bytes_returned, obdcmds_mode1[display0[a]].conv);
                     if (OBD_SUCCESS == obdstatus) {
@@ -2273,8 +2308,9 @@ void * thread_pinto(void *esContext) {
 
         if (sensor_in != NULL) {
             for (int a = 0; a<sizeof (io_sensor) / sizeof (T_IO); a++) {
-                fread(io_sensor[a].val, io_sensor[a].len, 1, gps_in);
+                fread(io_sensor[a].val, io_sensor[a].len, 1, sensor_in);
             }
+            //printf("%u %f %hhu\n", deltatime, posData->obd_speed, posData->obd_volt);
             usleep(deltatime * 1000);
         } else {
             for (int a = 0; a<sizeof (io_sensor) / sizeof (T_IO); a++) {
@@ -2701,13 +2737,18 @@ int main(int argc, char *argv[]) {
         } else {
             PRINTF("%s nicht gefunden.\n", filename);
         }
+        fseek(gps_in, 62 * 1330, SEEK_SET);
+        fseek(sensor_in, 9 * 1330, SEEK_SET);
+
     } else {
+#ifdef __RASPI__
         snprintf(filename, sizeof (filename) / sizeof (filename[0]), "%s/sit2d_%i.gps", HOME, posData.gps_file);
         gps_out = fopen(filename, "wb");
         assert(gps_out != NULL);
         snprintf(filename, sizeof (filename) / sizeof (filename[0]), "%s/sit2d_%i.obd", HOME, posData.gps_file);
         sensor_out = fopen(filename, "wb");
         assert(gps_out != NULL);
+#endif
     }
     assert(esCreateWindow(&esContext, "SiT2D", userData.width, userData.height, ES_WINDOW_RGB) == GL_TRUE);
 
@@ -2738,10 +2779,10 @@ int main(int argc, char *argv[]) {
     esContext.buttonFunc = Button;
 #else
     pthread_create(&thread_id1, NULL, &thread_foss, (void*) &esContext);
-    pthread_create(&thread_id2, NULL, &thread_pinto, (void*) &esContext);
+
     pthread_create(&thread_id3, NULL, &thread_jolla, (void*) &esContext);
 #endif
-
+    pthread_create(&thread_id2, NULL, &thread_pinto, (void*) &esContext);
     //pthread_create(&thread_id3, NULL, &thread_deta_lvl1, (void*) &esContext);
     pthread_create(&thread_id4, NULL, &thread_deta_lvl2, (void*) &esContext);
     pthread_create(&thread_id5, NULL, &thread_deta_lvl3, (void*) &esContext);

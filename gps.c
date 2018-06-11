@@ -1,5 +1,6 @@
 #include "gps.h"
 #include <syslog.h>
+#include <spawn.h>
 
 /**
  * Rescale a fixed-point value to a different scale. Rounds towards zero.
@@ -661,9 +662,10 @@ void nmea(char *line, GPS_T *data) {
                 putenv("TZ=Europe/Berlin");
 
                 if (abs(data->stamp - time(NULL)) > 60) {
-                    //stime(&data->stamp);
-                    //strftime(buffer, 80, "%d.%m.%Y %H:%M", localtime(&data->stamp));
-                    //printf("setze Uhrzeit: %s\n", buffer);
+                    stime(&data->stamp);
+                    system("/sbin/hwclock -wu");
+                    strftime(buffer, 80, "%d.%m.%Y %H:%M", localtime(&data->stamp));
+                    printf("setze Uhrzeit: %s\n", buffer);
                 }
 #endif
                 /*
