@@ -260,7 +260,7 @@ typedef struct {
     GLuint *texMap;
     GLuint *texfree;
     GLuint *texreload;
-    TEX_BUFFER_FORMAT *tex_buffer;
+    unsigned short *tex_buffer;
     GLuint textureId;
     //
 #ifdef __FBO__
@@ -274,7 +274,7 @@ typedef struct {
     GLuint vao[10];
 
     //
-    uint16_t auto_len;
+    //uint16_t auto_len;
 } UserData;
 
 typedef struct {
@@ -384,7 +384,7 @@ int Init(ESContext *esContext) {
 
     PRINTF("\r%s\n\r%s\n\r%s\n\r%s\n", glGetString(GL_VERSION), glGetString(GL_VENDOR), glGetString(GL_RENDERER), glGetString(GL_SHADING_LANGUAGE_VERSION));
 
-    char *f1, *f4, *v7, *f2, *f3, *v1, *v2, *v4, *f5, *v5;
+    char *f4, *v7, *f2, *f3, *v2, *v4, *f5, *v5;
     LoadGLSL(&f2, HOME "GLSL/f2.glsl");
     LoadGLSL(&v2, HOME "GLSL/v2.glsl");
     LoadGLSL(&f3, HOME "GLSL/f3.glsl");
@@ -393,8 +393,6 @@ int Init(ESContext *esContext) {
     LoadGLSL(&v5, HOME "GLSL/v5.glsl");
     LoadGLSL(&f5, HOME "GLSL/f5.glsl");
     LoadGLSL(&v7, HOME "GLSL/v7.glsl");
-    //LoadGLSL(&v1, HOME "GLSL/v1.glsl");
-    //LoadGLSL(&f1, HOME "GLSL/f1.glsl");
 
     userData->programGUI = esLoadProgram(v2, f2);
     userData->programKreis = esLoadProgram(v2, f3);
@@ -411,8 +409,6 @@ int Init(ESContext *esContext) {
     free(f5);
     free(v5);
     free(v7);
-    //free(v1);
-    //free(f1);
 
     glGenBuffers(20, &userData->buffindex[0]);
 
@@ -494,8 +490,9 @@ int Init(ESContext *esContext) {
         3, 6, 4,
         4, 6, 5,
         5, 6, 0,
+        0, 1, 2, 3, 4, 5,
     };
-    userData->auto_len = sizeof (auto_index) / sizeof (auto_index[0]);
+    //userData->auto_len = sizeof (auto_index) / sizeof (auto_index[0]);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof (auto_index), auto_index, GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
@@ -504,6 +501,15 @@ int Init(ESContext *esContext) {
     glEnable(GL_BLEND);
     glGenTextures(sizeof (gui_tex_index) / sizeof (unsigned int), &gui_tex_index[0]);
     glGenTextures(sizeof (gui_tex_zahlen) / sizeof (unsigned int), &gui_tex_zahlen[0]);
+
+
+    /*for (uint n = 0; n < 12; n++) {
+        for (uint m = 0; m < 12; m++) {
+            printf("%hu ", minus_tex[m + n * 12]);
+        }
+        printf("\n");
+    }
+    printf("--------------\n");*/
 
     glBindTexture(GL_TEXTURE_2D, gui_tex_index[0]);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 12, 12, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, plus_tex);
@@ -661,7 +667,10 @@ void Update(ESContext *esContext, float deltaTime) {
     esMatrixMultiply(&mvpMatrix, &modelview, &perspective);
 #endif
 
-    double a = sqrt(pow(posData->obd_speed, 2.0) / (pow(posData->V[0], 2.0) + pow(posData->V[1], 2.0)));
+    double a = sqrt(pow(posData->obd_speed * 1.1f, 2.0) / (pow(posData->V[0], 2.0) + pow(posData->V[1], 2.0)));
+
+    //posData->V[0] = 1.939570;
+    //posData->V[1] = 0.098890;
 
     posData->v_x = a * posData->V[0];
     posData->v_y = -a * posData->V[1];
@@ -699,7 +708,7 @@ void Update(ESContext *esContext, float deltaTime) {
     pthread_mutex_lock(&mutex_deto_lvl1);
     if (new_tex_lvl1 == 1) {
         glBufferData(GL_ARRAY_BUFFER, sizeof (gitter), gitter, GL_STATIC_DRAW);
-        new_tex_lvl1 = 0;
+        //new_tex_lvl1 = 0;
         PRINTGLERROR
     }
     pthread_mutex_unlock(&mutex_deto_lvl1);
@@ -724,13 +733,21 @@ void Update(ESContext *esContext, float deltaTime) {
     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS_REIS]);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX_REIS]);
 
+    pthread_mutex_lock(&mutex_deto_lvl1);
+    if (new_tex_lvl1 == 1) {
+        glBufferData(GL_ARRAY_BUFFER, 20 * verts_reis_len, verts_F_reis, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_reis_len * sizeof (short), index_reis, GL_DYNAMIC_DRAW);
+        new_tex_lvl1 = 0;
+        PRINTGLERROR
+    }
+    pthread_mutex_unlock(&mutex_deto_lvl1);
+
     glVertexAttribPointer(userData->positionLocMapH, 3, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) 0);
     glVertexAttribPointer(userData->positionLocMapL, 2, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) (3 * sizeof (GL_FLOAT)));
 
-
     for (uint16_t m_n = 0; m_n < farbe_reis_len; m_n++) {
-        glUniform3f(userData->colorLocMap, farbe_yama[m_n].r, farbe_yama[m_n].g, farbe_yama[m_n].b);
-        glDrawElements(GL_TRIANGLES, farbe_yama[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe_yama[m_n].index));
+        glUniform3f(userData->colorLocMap, farbe_reis[m_n].r, farbe_reis[m_n].g, farbe_reis[m_n].b);
+        glDrawElements(GL_TRIANGLES, farbe_reis[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe_reis[m_n].index));
     }
     PRINTGLERROR
 
@@ -756,7 +773,6 @@ void Update(ESContext *esContext, float deltaTime) {
     }
     PRINTGLERROR
 
-
     // WERDER
     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFFER_VERTS_WERDER]);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, userData->buffindex[BUFFER_INDEX_WERDER]);
@@ -773,11 +789,12 @@ void Update(ESContext *esContext, float deltaTime) {
     glVertexAttribPointer(userData->positionLocMapH, 3, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) 0);
     glVertexAttribPointer(userData->positionLocMapL, 2, GL_FLOAT, GL_FALSE, 5 * sizeof (GL_FLOAT), (GLvoid*) (3 * sizeof (GL_FLOAT)));
 
+#ifdef __RASPI__
     for (uint16_t m_n = 0; m_n < farbe_werder_len; m_n++) {
         glUniform3f(userData->colorLocMap, farbe_werder[m_n].r, farbe_werder[m_n].g, farbe_werder[m_n].b);
         glDrawElements(GL_TRIANGLES, farbe_werder[m_n].len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(farbe_werder[m_n].index));
     }
-
+#else
     ///////////////// DEBUG
     float color[] = {
         1.0f, 0.0f, 0.0f,
@@ -793,9 +810,9 @@ void Update(ESContext *esContext, float deltaTime) {
 
             glUniform3f(userData->colorLocMap, color[c], color[c + 1], color[c + 2]);
             glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, BUFFER_OFFSET(3 * n));
-
         }
     }
+#endif
     PRINTGLERROR
 
     // Auto
@@ -815,12 +832,18 @@ void Update(ESContext *esContext, float deltaTime) {
     glUniform2f(userData->offsetLLocMap, fmod(g_x, 1.0f), fmod(g_y, 1.0f));
 
     glUniform3f(userData->colorLocMap, 1.0f, 0.0f, 0.0f);
-    glDrawElements(GL_TRIANGLES, userData->auto_len, GL_UNSIGNED_SHORT, BUFFER_OFFSET(0));
+    glDrawElements(GL_TRIANGLES, 18, GL_UNSIGNED_SHORT, BUFFER_OFFSET(0));
+
+    glUniform3f(userData->colorLocMap, 0.0f, 0.0f, 0.0f);
+    glLineWidth(2.0f);
+    glDrawElements(GL_LINE_LOOP, 6, GL_UNSIGNED_SHORT, BUFFER_OFFSET(18));
+    glLineWidth(1.0f);
+
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
 
-#ifdef __RASPI__
+    //#ifdef __RASPI__
     // GUI
     glUseProgram(userData->programGUI);
     glActiveTexture(GL_TEXTURE0);
@@ -850,7 +873,7 @@ void Update(ESContext *esContext, float deltaTime) {
     glUniform3f(userData->colorLocKreis, gps_status[0], gps_status[1], gps_status[2]);
     glDrawArrays(GL_TRIANGLE_STRIP, 15, 4);
     PRINTGLERROR
-#endif
+            //#endif
 }
 
 void Button(ESContext *esContext, int x, int y) {
@@ -1696,7 +1719,7 @@ void * thread_ubongo(void *esContext) {
             //double V2[2] = {gpsData->g_x - old_g_x, -(gpsData->g_y - old_g_y)};
 
 
-            //printf("%u: %f %f %f %f\n", counter, gpsData->g_x, old_g_x, gpsData->g_y, old_g_y);
+            //printf("%u\n", counter);
 
             usleep(deltatime * 1000);
         } else {
@@ -1772,11 +1795,16 @@ void * thread_ubongo(void *esContext) {
                 sumtime += deltatime;
             }
 
+            //printf("%f %f\n", V[0], V[1]);
             double alpha = acos((AB[0] * V[0] + AB[1] * V[1]) / (sqrt(c) * sqrt(pow(V[0], 2.0) + pow(V[1], 2.0)))) * 180.0f / M_PI;
 
-            posData->V[0] = (alpha > 90.0f) ? -1.0 * AB[0] : AB[0];
-            posData->V[1] = (alpha > 90.0f) ? -1.0 * AB[1] : AB[1];
-
+            //printf("%f\n",alpha);
+            if (V[0] == 0.0 && V[1] == 0.0) {
+                continue;
+            } else {
+                posData->V[0] = (alpha > 90.0f) ? -1.0 * AB[0] : AB[0];
+                posData->V[1] = (alpha > 90.0f) ? -1.0 * AB[1] : AB[1];
+            }
             //posData->angle = acos((0.0f * posData->V[0] + 1.0f * posData->V[1]) / (1.0f * sqrt(pow(posData->V[0], 2.0) + pow(posData->V[1], 2.0)))) * 180.0f / M_PI;
 
             //double a = sqrt(pow(posData->obd_speed, 2.0) / (pow(posData->V[0], 2.0) + pow(posData->V[1], 2.0)));
@@ -1825,71 +1853,84 @@ void * thread_ubongo(void *esContext) {
                     ORDER BY l_id,w_seq"
 //L_ID = 27811900
 
-void * thread_deta_lvl1(void *esContext) {
-    POS_T *posData = ((ESContext*) esContext)->posData;
-    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
-    PRINTF("\rdeta_lvl1 gestartet\n");
-
-    struct timespec spec0, spec1;
-
+void * run_deta_lvl1(double x, double y) {
     char sql[700];
     char *zErrMsg = 0;
     int lon1, lat1, d1;
 
-    sleep(1);
 
-    while (1) {
-        clock_gettime(CLOCK_MONOTONIC, &spec0);
-        int c = 0;
-        for (int16_t d = -8; d < 8; d++) {
-            gitter[c] = floor(gpsData->g_x) - 12;
-            gitter[c + 1] = floor(gpsData->g_y) - (float) d;
-            c += 4;
+    int c = 0;
+    for (int16_t d = -8; d < 8; d++) {
+        gitter[c] = floor(x) - 12;
+        gitter[c + 1] = floor(y) - (float) d;
+        c += 4;
 
-            gitter[c] = floor(gpsData->g_x) + 12;
-            gitter[c + 1] = floor(gpsData->g_y) - (float) d;
-            c += 4;
-        }
-        for (int16_t d = -12; d < 12; d++) {
-            gitter[c] = floor(gpsData->g_x) + (float) d;
-            gitter[c + 1] = floor(gpsData->g_y) - 12;
-            c += 4;
+        gitter[c] = floor(x) + 12;
+        gitter[c + 1] = floor(y) - (float) d;
+        c += 4;
+    }
+    for (int16_t d = -12; d < 12; d++) {
+        gitter[c] = floor(x) + (float) d;
+        gitter[c + 1] = floor(y) - 12;
+        c += 4;
 
-            gitter[c] = floor(gpsData->g_x) + (float) d;
-            gitter[c + 1] = floor(gpsData->g_y) + 12;
-            c += 4;
-        }
-
-        lon1 = (int) floor(posData->g_x);
-        lat1 = (int) floor(posData->g_y);
-        d1 = (int) floor(BR);
-
-        verts_reis_len = 0;
-        tmp_index_reis_len = 0;
-        tmp_farbe_reis_len = 0;
-
-        snprintf(sql, 700, SQL_ABFRAGE, (lon1 - d1) >> SHIFT, (lon1 + d1) >> SHIFT, (lat1 - d1) >> SHIFT, (lat1 + d1) >> SHIFT);
-        //printf("\r%s\n", sql);
-        sqlite3_exec(db_1, sql, sqc_vertex_lvl1, 0, &zErrMsg);
-        if (zErrMsg != NULL) {
-            printf("\n|%s|\n", zErrMsg);
-        }
-
-        pthread_mutex_lock(&mutex_deto_lvl1);
-        farbe_reis_len = tmp_farbe_reis_len;
-        index_reis_len = tmp_index_reis_len;
-        memcpy(farbe_reis, tmp_farbe_reis, tmp_farbe_reis_len * sizeof (T_V_E));
-        memcpy(index_reis, tmp_index_reis, tmp_index_reis_len * sizeof (unsigned short));
-
-        new_tex_lvl1 = 1;
-        pthread_mutex_unlock(&mutex_deto_lvl1);
-
-
-        printf("deta_lvl1: ");
-        TM(spec0, spec1)
-        usleep(10000000);
+        gitter[c] = floor(x) + (float) d;
+        gitter[c + 1] = floor(y) + 12;
+        c += 4;
     }
 
+    lon1 = (int) floor(x);
+    lat1 = (int) floor(y);
+    d1 = (int) floor(BR);
+
+    verts_reis_len = 0;
+    tmp_index_reis_len = 0;
+    tmp_farbe_reis_len = 0;
+
+    snprintf(sql, 700, SQL_ABFRAGE, (lon1 - d1) >> SHIFT, (lon1 + d1) >> SHIFT, (lat1 - d1) >> SHIFT, (lat1 + d1) >> SHIFT);
+    //printf("\r%s\n", sql);
+    sqlite3_exec(db_1, sql, sqc_vertex_lvl1, 0, &zErrMsg);
+    if (zErrMsg != NULL) {
+        printf("\n|%s|\n", zErrMsg);
+    }
+
+    pthread_mutex_lock(&mutex_deto_lvl1);
+    farbe_reis_len = tmp_farbe_reis_len;
+    index_reis_len = tmp_index_reis_len;
+    memcpy(farbe_reis, tmp_farbe_reis, tmp_farbe_reis_len * sizeof (T_V_E));
+    memcpy(index_reis, tmp_index_reis, tmp_index_reis_len * sizeof (unsigned short));
+
+    new_tex_lvl1 = 1;
+    pthread_mutex_unlock(&mutex_deto_lvl1);
+}
+
+void * thread_deta_lvl1(void *esContext) {
+    POS_T *posData = ((ESContext*) esContext)->posData;
+
+    sleep(1);
+    PRINTF("\rdeta_lvl1 gestartet\n");
+
+#ifdef __DEBUG__
+    struct timespec spec0, spec1;
+#endif
+
+    while (1) {
+#ifdef __DEBUG__
+        clock_gettime(CLOCK_MONOTONIC, &spec0);
+#endif
+        run_deta_lvl1(posData->g_x + posData->o_x, posData->g_y - posData->o_y);
+
+#ifdef __DEBUG__
+        printf("deta_lvl2: ");
+        TM(spec0, spec1)
+#endif
+
+#ifdef __RASPI__
+                usleep(10000000);
+#else
+                usleep(1000000);
+#endif
+    }
     return NULL;
 }
 
@@ -2032,6 +2073,8 @@ void * thread_jolla(void *esContext) {
     char finish = 0;
     //int lk = 0;
 
+    PRINTF("\rJOLLA gestartet\n");
+
     fd = open("/dev/input/event0", O_RDONLY);
     while (fd != -1) {
         rb = read(fd, ev, sizeof (struct input_event) * 64);
@@ -2050,8 +2093,8 @@ void * thread_jolla(void *esContext) {
 
         if (finish == 1) {
             if (rawX > 710 && rawX < 750 && rawY > 430 && rawY < 480) {
-                if (ORTHO > 1.0) {
-                    ORTHO -= 1.0f;
+                if (ORTHO < 18.0) {
+                    ORTHO += 1.0f;
                     esMatrixLoadIdentity(&perspective);
                     esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
                 }
@@ -2183,6 +2226,15 @@ void * thread_pinto(void *esContext) {
 #ifdef __OBD__     
         //clock_gettime(CLOCK_MONOTONIC, &to1);
         if (obd_serial != -1) {
+            if (obd_serial != -1) {
+                snprintf(outstr, sizeof (outstr), "%s%s", "ATRV", "\r");
+                ssize_t dfg = write(obd_serial, outstr, strlen(outstr));
+                nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
+                retbuf[4] = '\0';
+                sscanf(retbuf, "%f", &tmp_val);
+                posData->obd_volt = (uint8_t) (tmp_val * 10.0f);
+            }
+
 
             obdstatus = getobdvalue(obd_serial, 0x0D, &tmp_val, obdcmds_mode1[0x0D].bytes_returned, obdcmds_mode1[0x0D].conv);
             if (OBD_SUCCESS == obdstatus) {
@@ -2192,13 +2244,7 @@ void * thread_pinto(void *esContext) {
                 *((float*) obdcmds_mode1[0x0D].target) = 0.0f;
                 obd_serial = -1;
             }
-            snprintf(outstr, sizeof (outstr), "%s%s", "ATRV", "\r");
-            write(obd_serial, outstr, strlen(outstr));
 
-            nbytes = readserialdata(obd_serial, retbuf, sizeof (retbuf));
-            retbuf[4] = '\0';
-            sscanf(retbuf, "%f", &tmp_val);
-            posData->obd_volt = (uint8_t) (tmp_val * 10.0f);
 
             if (*posData->display == 0) {
                 for (uint_fast8_t a = 1; a< sizeof (display0) / sizeof (display0[0]); a++) {
@@ -2312,13 +2358,17 @@ void * thread_pinto(void *esContext) {
             }
             //printf("%u %f %hhu\n", deltatime, posData->obd_speed, posData->obd_volt);
             usleep(deltatime * 1000);
-        } else {
+        }
+#ifdef __RASPI__
+        else {
             for (int a = 0; a<sizeof (io_sensor) / sizeof (T_IO); a++) {
                 fwrite(io_sensor[a].val, io_sensor[a].len, 1, sensor_out);
             }
             fflush(sensor_out);
         }
+#endif
         even++;
+
     }
 
     return NULL;
@@ -2367,10 +2417,9 @@ void thread_render(ESContext * esContext) {
 
             //PRINTF("\rFPS: %3.1f FRAMETIME: %i %4.1f %i  us: %u\n", frames / totaltime, ms_min, (float) ms_avg / frames, ms_max, us);
 
-            if ((frames / totaltime) > 30.0) {
+            if ((frames / totaltime) > 30.0f) {
                 us += 1000;
             } else {
-
                 us = us > 1000 ? us - 1000 : us;
             }
 
@@ -2404,12 +2453,12 @@ static int sqc_vertex_lvl1(void *a, int argc, char **argv, char **azColName) {
     memcpy(&verts_F_reis[5 * verts_reis_len], tmp_verts_F, sizeof (tmp_verts_F));
     gef = verts_reis_len;
     verts_reis_len++;
-    tmp_index_yama[tmp_index_reis_len] = gef;
+    tmp_index_reis[tmp_index_reis_len] = gef;
 
     tmp_index_reis_len++;
 
     if ((tmp_farbe_reis_len == 0) ||
-            (tmp_farbe_reis[tmp_farbe_reis_len - 1].r != tmp_f[0] || tmp_farbe_reis[tmp_farbe_reis_len - 1].g != tmp_f[1] || tmp_farbe_reis[tmp_farbe_yama_len - 1].b != tmp_f[2])) {
+            (tmp_farbe_reis[tmp_farbe_reis_len - 1].r != tmp_f[0] || tmp_farbe_reis[tmp_farbe_reis_len - 1].g != tmp_f[1] || tmp_farbe_reis[tmp_farbe_reis_len - 1].b != tmp_f[2])) {
         tmp_farbe_reis[tmp_farbe_reis_len].r = tmp_f[0];
         tmp_farbe_reis[tmp_farbe_reis_len].g = tmp_f[1];
         tmp_farbe_reis[tmp_farbe_reis_len].b = tmp_f[2];
@@ -2691,7 +2740,7 @@ int main(int argc, char *argv[]) {
 
     char filename[100]/*, buffer[80]*/;
 
-    pthread_t thread_id1, thread_id2, thread_id3, thread_id4, thread_id5, thread_id6;
+    pthread_t thread_id1, thread_id2, thread_id3, thread_id4, thread_id5, thread_id6, thread_id7;
     pthread_mutex_init(&m_pinto, NULL);
     pthread_mutex_init(&mutex_deto_lvl1, NULL);
     pthread_mutex_init(&mutex_deto_lvl2, NULL);
@@ -2725,6 +2774,8 @@ int main(int argc, char *argv[]) {
         char *tmp = strchr(argv[1], '.');
         *tmp = '\0';
 
+        //  /home/florian/sit2d_26.gps
+
         snprintf(filename, sizeof (filename) / sizeof (filename[0]), "%s.gps", argv[1]);
         gps_in = fopen(filename, "rb");
         assert(gps_in != NULL);
@@ -2737,8 +2788,8 @@ int main(int argc, char *argv[]) {
         } else {
             PRINTF("%s nicht gefunden.\n", filename);
         }
-        fseek(gps_in, 62 * 1330, SEEK_SET);
-        fseek(sensor_in, 9 * 1330, SEEK_SET);
+        //fseek(gps_in, 78 * 325, SEEK_SET);
+        //fseek(sensor_in, 9 * 325, SEEK_SET);
 
     } else {
 #ifdef __RASPI__
@@ -2777,13 +2828,13 @@ int main(int argc, char *argv[]) {
 #ifndef __RASPI__
     esContext.keyFunc = Key;
     esContext.buttonFunc = Button;
+
+    pthread_create(&thread_id3, NULL, &thread_deta_lvl1, (void*) &esContext);
 #else
     pthread_create(&thread_id1, NULL, &thread_foss, (void*) &esContext);
-
-    pthread_create(&thread_id3, NULL, &thread_jolla, (void*) &esContext);
+    pthread_create(&thread_id7, NULL, &thread_jolla, (void*) &esContext);
 #endif
     pthread_create(&thread_id2, NULL, &thread_pinto, (void*) &esContext);
-    //pthread_create(&thread_id3, NULL, &thread_deta_lvl1, (void*) &esContext);
     pthread_create(&thread_id4, NULL, &thread_deta_lvl2, (void*) &esContext);
     pthread_create(&thread_id5, NULL, &thread_deta_lvl3, (void*) &esContext);
     pthread_create(&thread_id6, NULL, &thread_ubongo, (void*) &esContext);

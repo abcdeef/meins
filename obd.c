@@ -1065,7 +1065,7 @@ int init_OBD(char *serial) {
     blindcmd(fd, "ATH0", 1);
     // Protocoll 5-  Lada Niva Euro4; 6-Toyota T27
     blindcmd(fd, "ATSP5", 1);
-
+    
     usleep(4000000);
     blindcmd(fd, "0100", 1);
 

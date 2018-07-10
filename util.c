@@ -18,9 +18,11 @@ unsigned short blue_mask = 0x1F;
 int32_t fp32(double value, int8_t Q) {
     return (int32_t) (value * (1 << Q));
 }
+
 int64_t fp64(double value, int8_t Q) {
     return (int64_t) (value * (1 << Q));
 }
+
 double pf32(int32_t value, int8_t Q) {
     return (double) value / (double) (Q > 0 ? (1 << Q) : (1 >> (-Q)));
 }
@@ -123,9 +125,9 @@ int delay(unsigned long millis) {
  */
 void load_TGA(unsigned short * buffer, char *fileName) {
     FILE *f;
-    unsigned char row[8], bbp;
+    unsigned char row[255], bbp, id_lenght = 0;
     unsigned short width, height;
-    TEX_BUFFER_FORMAT r, g, b, a, rgba;
+    unsigned short r, g, b, a, rgba;
 
     f = fopen(fileName, "rb");
     if (f == NULL) {
@@ -133,13 +135,12 @@ void load_TGA(unsigned short * buffer, char *fileName) {
         return;
     }
     // HEADER
-    fread(row, 8, 1, f);
-    fread(row, 4, 1, f);
+    fread(&id_lenght, 1, 1, f);
+    fread(row, 11, 1, f);
     fread(&width, 2, 1, f);
     fread(&height, 2, 1, f);
     fread(&bbp, 1, 1, f);
-    fread(row, 1, 1, f);
-    //printf("%ix%i %i\n", width, height, bbp);
+    fread(row, id_lenght + 1, 1, f);
 
     //BGR_A
     for (int m = height - 1; m > -1; m--) {
@@ -151,7 +152,6 @@ void load_TGA(unsigned short * buffer, char *fileName) {
             a = row[3] >> 7;
 
             rgba = (r & red_mask) | (g & 1984) | (b & 62) | (a & 1);
-            //printf("%i %i\n", m, n);
             *(buffer + n + m * width) = rgba;
         }
     }
