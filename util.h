@@ -15,11 +15,11 @@
 #define GL_TEX_FORMAT GL_UNSIGNED_SHORT_5_6_5
 #define TEX_BUFFER_FORMAT unsigned short
 #else
-#define GL_TEX_FORMAT GL_UNSIGNED_BYTE
-#define TEX_BUFFER_FORMAT char
+//#define GL_TEX_FORMAT GL_UNSIGNED_BYTE
+//#define TEX_BUFFER_FORMAT unsigned short
 #endif
 
-int load_png(FILE *fp, TEX_BUFFER_FORMAT *dst, unsigned int, unsigned short image_size);
+int load_png(FILE *fp, unsigned short *dst, unsigned int, unsigned short image_size);
 void load_TGA(unsigned short * buffer, char *fileName);
 int long2tilex(double lon, int z);
 int lat2tiley(double lat, int z);
