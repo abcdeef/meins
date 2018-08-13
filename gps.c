@@ -649,6 +649,8 @@ void nmea(char *line, GPS_T *data) {
                 char buffer[80];
                 struct tm tmp;
 
+                data->angle = minmea_tofloat(&frame.course);
+
                 tmp.tm_year = frame.date.year + 100;
                 tmp.tm_mon = frame.date.month - 1;
                 tmp.tm_mday = frame.date.day;
@@ -663,7 +665,7 @@ void nmea(char *line, GPS_T *data) {
 
                 if (abs(data->stamp - time(NULL)) > 60) {
                     stime(&data->stamp);
-                    system("/sbin/hwclock -wu");
+                    //system("/sbin/hwclock -wu");
                     strftime(buffer, 80, "%d.%m.%Y %H:%M", localtime(&data->stamp));
                     printf("setze Uhrzeit: %s\n", buffer);
                 }
@@ -730,7 +732,7 @@ void nmea(char *line, GPS_T *data) {
                         minmea_tofloat(&frame.speed_knots));
                 printf(INDENT_SPACES "speed kph = %f\n",
                         minmea_tofloat(&frame.speed_kph));*/
-                data->angle = minmea_tofloat(&frame.true_track_degrees);
+                //data->angle = minmea_tofloat(&frame.true_track_degrees);
 
             } else {
                 printf(INDENT_SPACES "sentence is not parsed\n");
