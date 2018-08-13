@@ -1,6 +1,10 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+typedef struct {
+    unsigned short width, height, *buffer;
+} T_TEXT;
+
 #define IMAGE_SIZE 256
 
 #define SCALE 1
@@ -20,11 +24,11 @@
 #endif
 
 int load_png(FILE *fp, unsigned short *dst, unsigned int, unsigned short image_size);
-void load_TGA(unsigned short * buffer, char *fileName);
-int long2tilex(double lon, int z);
-int lat2tiley(double lat, int z);
-double tilex2long(int x, int z);
-double tiley2lat(int y, int z);
+unsigned short * load_TGA(unsigned short *width, unsigned short *height, char *fileName);
+//int long2tilex(double lon, int z);
+//int lat2tiley(double lat, int z);
+//double tilex2long(int x, int z);
+//double tiley2lat(int y, int z);
 double long2offsetX(double lon, int z, int scale);
 float lat2offsetY(double lat, int z, int scale);
 void printBin(unsigned char *CH);

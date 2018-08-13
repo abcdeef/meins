@@ -48,13 +48,17 @@ float buttons[] = {
     -GPS_I_R / 4, -GPS_I_R / 4, 0.0f, 0.0f,
     +GPS_I_R / 4, +GPS_I_R / 4, 1.0f, 1.0f,
     +GPS_I_R / 4, -GPS_I_R / 4, 1.0f, 0.0f,
+    /* night */
+    -K + B_X - 0.13f, K - B_Y, 0.0f, 0.0f,
+    -K + B_X - 0.13f, -K - B_Y, 0.0f, 1.0f,
+    K + B_X - 0.13f, K - B_Y, 1.0f, 0.0f,
+    K + B_X - 0.13f, -K - B_Y, 1.0f, 1.0f,
 };
 
 unsigned short auto_tex = ROT;
-unsigned int gui_tex_index[4], gui_tex_zahlen[47];
+unsigned int gui_tex_index[10], gui_tex_zahlen[47];
 
-unsigned short plus_tex[144], minus_tex[144], menu_tex[144];
-
-unsigned short tex_zahlen[200 * 47];
+T_TEXT plus_tex, minus_tex, menu_tex, night_tex, tex_zahlen;
+//unsigned short *plus_tex, *minus_tex, *menu_tex, *tex_zahlen;
 
 #endif /* GUI_H_ */

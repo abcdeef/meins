@@ -23,8 +23,8 @@
 
 #define LCD_LINE_1  0x80    
 #define LCD_LINE_2  0xC0 
-#define E_PULSE  4
-#define E_DELAY  4
+#define E_PULSE  5
+#define E_DELAY  5
 
 int bl_write(char *value);
 void gpio_init();

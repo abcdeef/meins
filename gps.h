@@ -31,11 +31,11 @@ typedef struct {
     double longitude;
     double latitude;
     time_t stamp;
-    //struct tm tm;
     float angle;
+    float angle2;
     float speed;
-    double g_x;
-    double g_y;
+    double g[2];
+    double V[2];
 } GPS_T;
 
 enum minmea_sentence_id {

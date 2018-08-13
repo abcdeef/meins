@@ -67,7 +67,7 @@ typedef struct _escontext {
     /// Callbacks
     void (ESCALLBACK *drawFunc)(struct _escontext *);
     void (ESCALLBACK *keyFunc)(struct _escontext *, unsigned char, int, int);
-    void (ESCALLBACK *buttonFunc)(struct _escontext *, int, int);
+    void (ESCALLBACK *buttonFunc)(int, int);
     void (ESCALLBACK *updateFunc)(struct _escontext *, float deltaTime);
 
 } ESContext;
