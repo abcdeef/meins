@@ -646,10 +646,11 @@ void nmea(char *line, GPS_T *data) {
         {
             struct minmea_sentence_rmc frame;
             if (minmea_parse_rmc(&frame, line)) {
+                data->angle = minmea_tofloat(&frame.course);
+
+#ifdef __RASPI__
                 char buffer[80];
                 struct tm tmp;
-
-                data->angle = minmea_tofloat(&frame.course);
 
                 tmp.tm_year = frame.date.year + 100;
                 tmp.tm_mon = frame.date.month - 1;
@@ -658,7 +659,8 @@ void nmea(char *line, GPS_T *data) {
                 tmp.tm_min = frame.time.minutes;
                 tmp.tm_sec = frame.time.seconds;
 
-#ifdef __RASPI__
+
+
                 putenv("TZ=UTC");
                 data->stamp = mktime(&tmp);
                 putenv("TZ=Europe/Berlin");

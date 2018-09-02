@@ -163,7 +163,7 @@ GLboolean userInterrupt(ESContext *esContext) {
         if (xev.type == ButtonPress) {
             if (xev.xbutton.button == Button1) {
                 if (esContext->buttonFunc != NULL) {
-                    esContext->buttonFunc( xev.xbutton.x, xev.xbutton.y);
+                    esContext->buttonFunc(xev.xbutton.x, xev.xbutton.y, esContext);
                 }
             }
 

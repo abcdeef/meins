@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdlib.h>
 #include <stdio.h>
 #include <signal.h>
@@ -46,6 +47,7 @@ enum BL_STATUS {
 
 FILE *sout;
 
+GLuint FramebufferName = 0, renderedTexture, renderBuffer;
 
 
 #define V_SKALAR(A,B) (A[0] * B[0] + A[1] * B[1])
@@ -60,11 +62,21 @@ FILE *sout;
 //#define MEM(x) (int)(x * 256 )
 #define PRINTF(...) fprintf(sout,__VA_ARGS__);fflush(sout);fprintf(stdout,__VA_ARGS__)
 #define PRINTGLERROR printOglError(__FILE__, __LINE__);
-#ifdef __TM__
+/*#ifdef __TM__
 #define TM(START,END,...) clock_gettime(CLOCK_MONOTONIC, &END);printf("%lims\n",(END.tv_sec - START.tv_sec) * 1000 + (END.tv_nsec - START.tv_nsec) / 1000000);
 #else
 #define TM(START, END,...) 
+#endif*/
+
+#ifdef __DEBUG__
+#define TIME(A,B) struct timespec dfsdf0, dfsdf1;clock_gettime(CLOCK_MONOTONIC, &dfsdf0);A;clock_gettime(CLOCK_MONOTONIC, &dfsdf1);printf("%s: %lims\n",B,(dfsdf1.tv_sec - dfsdf0.tv_sec) * 1000 + (dfsdf1.tv_nsec - dfsdf0.tv_nsec) / 1000000);
+#define DEBUG(...) fprintf(sout,__VA_ARGS__);fflush(sout);fprintf(stdout,__VA_ARGS__)
+#else
+#define TIME(A,B) A;
+#define DEBUG(...)
 #endif
+
+
 #define FRACTPART 10000000
 
 #define BUFF_INDEX_GUI 0
@@ -81,6 +93,8 @@ FILE *sout;
 #define BUFFER_INDEX_AUTO 16
 #define BUFFER_VERTS_AUTO_GPS 17
 #define BUFFER_INDEX_AUTO_GPS 18
+#define BUFF_INDEX_GUI2 19
+#define BUFF_VERTS_GUI2 20
 
 //#define FBO_WIDTH 1024
 //#define FBO_HEIGHT 1024
@@ -177,6 +191,7 @@ uint16_t verts_yama_len = 0, verts_werder_len = 0, verts_reis_len = 0;
 //unsigned short reis_len = 0, reis_index_len = 0;
 
 int sqc_tmp;
+
 
 //void setPOS(ESContext *esContext);
 static int sqc_vertex_lvl1(void *a, int argc, char **argv, char **azColName);
@@ -287,7 +302,7 @@ typedef struct {
     GLuint fbo_texture;
 #endif
     //Buffer
-    GLuint buffindex[20];
+    GLuint buffindex[25];
     GLuint vao[10];
 
     //
@@ -396,7 +411,70 @@ int printOglError(char *file, int line) {
     return retCode;
 }
 
-int Init(ESContext *esContext) {
+void renderGUITex(ESContext *esContext) {
+    UserData *userData = esContext->userData;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, FramebufferName);
+    PRINTGLERROR
+    glViewport(0, -160, 800, 800);
+    PRINTGLERROR
+    glClearColor(1.0f, 0.0f, 1.0f, 0.0f);
+    PRINTGLERROR
+
+    glClear(GL_COLOR_BUFFER_BIT);
+    PRINTGLERROR
+
+    glUseProgram(userData->programGUI);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(userData->samplerLocGui, 0);
+    PRINTGLERROR
+
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
+    glVertexAttribPointer(userData->positionLocGui, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
+    glVertexAttribPointer(userData->texCoordLocGui, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
+    PRINTGLERROR
+
+    // Buttons
+    glBindTexture(GL_TEXTURE_2D, gui_tex_index[0]);
+    glDrawArrays(GL_TRIANGLE_STRIP, 3, 4);
+    glBindTexture(GL_TEXTURE_2D, gui_tex_index[1]);
+    glDrawArrays(GL_TRIANGLE_STRIP, 7, 4);
+    //glBindTexture(GL_TEXTURE_2D, gui_tex_index[4]);
+    //glDrawArrays(GL_TRIANGLE_STRIP, 11, 4);
+    //glBindTexture(GL_TEXTURE_2D, gui_tex_index[5]);
+    //glDrawArrays(GL_TRIANGLE_STRIP, 30, 4);
+    PRINTGLERROR
+
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_VERTS_GUI2]);
+    glVertexAttribPointer(userData->positionLocGui, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
+    glVertexAttribPointer(userData->texCoordLocGui, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
+    glBindTexture(GL_TEXTURE_2D, gui_tex_index[5]);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glBindTexture(GL_TEXTURE_2D, gui_tex_index[4]);
+    glDrawArrays(GL_TRIANGLE_STRIP, 480, 4);
+    PRINTGLERROR
+
+    /*srand(time(NULL));
+    float r = (rand() % 20) / 19.0;
+    float g = (rand() % 20) / 19.0;
+    float b = (rand() % 20) / 19.0;*/
+    // GPS_I
+    glUseProgram(userData->programKreis);
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
+    glVertexAttribPointer(userData->positionLocKreis, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) 0);
+    glVertexAttribPointer(userData->texCoordLocKreis, 2, GL_FLOAT, GL_FALSE, 4 * sizeof (GL_FLOAT), (GLvoid*) (2 * sizeof (GL_FLOAT)));
+    PRINTGLERROR
+
+    //glUniform3f(userData->colorLocKreis, r, g, b);
+    glUniform3f(userData->colorLocKreis, gps_status[0], gps_status[1], gps_status[2]);
+    glDrawArrays(GL_TRIANGLE_STRIP, 15, 4);
+    PRINTGLERROR
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    PRINTGLERROR
+}
+
+int init(ESContext *esContext) {
     UserData *userData = esContext->userData;
     POS_T *posData = ((ESContext*) esContext)->posData;
 
@@ -428,7 +506,7 @@ int Init(ESContext *esContext) {
     free(v5);
     free(v7);
 
-    glGenBuffers(20, &userData->buffindex[0]);
+    glGenBuffers(30, &userData->buffindex[0]);
 
     userData->positionLocDreieck = glGetAttribLocation(userData->programDreieck, "a_position");
     userData->AngleLocDreieck = glGetUniformLocation(userData->programDreieck, "u_angle");
@@ -476,8 +554,9 @@ int Init(ESContext *esContext) {
 
 
     // NICHT LÖSCHEN! der raspi  brauch das
-    for (int fg = 0; fg < 20; fg++)
+    for (int fg = 0; fg < 25; fg++) {
         glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[fg]);
+    }
 
     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_GUI]);
     glBufferData(GL_ARRAY_BUFFER, sizeof (buttons), buttons, GL_STATIC_DRAW);
@@ -550,6 +629,13 @@ int Init(ESContext *esContext) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
+    glBindTexture(GL_TEXTURE_2D, gui_tex_index[5]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, new_tex.width, new_tex.height, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, new_tex.buffer);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
     glBindTexture(GL_TEXTURE_2D, gui_tex_index[2]);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, &auto_tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -566,8 +652,95 @@ int Init(ESContext *esContext) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }*/
 
+    PRINTGLERROR
+
+#define ICON 0.13f
+#define MIN_X 1.98f
+#define MIN_Y 1.18f
+
+    uint8_t no_x = (uint8_t) (MIN_X / ICON);
+    uint8_t no_y = (uint8_t) (MIN_Y / ICON);
+    float icon = ICON;
+
+    buttons2 = (float *) realloc(buttons2, no_x * no_y * 4 * 4 * sizeof (float));
+
+    uint16_t mdr = 0;
+
+    for (uint8_t m = 0; m < no_y; m++) {
+        for (uint8_t n = 0; n < no_x; n++) {
+            buttons2[mdr] = -(MIN_X / 2) + n * icon;
+            buttons2[mdr + 1] = (MIN_Y / 2) - m * icon;
+            buttons2[mdr + 2] = 0.0f;
+            buttons2[mdr + 3] = 0.0f;
+            //
+            buttons2[mdr + 4] = -(MIN_X / 2) + n * icon;
+            buttons2[mdr + 5] = (MIN_Y / 2) - (m + 1) * icon;
+            buttons2[mdr + 6] = 0.0f;
+            buttons2[mdr + 7] = 1.0f;
+            //
+            buttons2[mdr + 8] = -(MIN_X / 2) + (n + 1) * icon;
+            buttons2[mdr + 9] = (MIN_Y / 2) - m * icon;
+            buttons2[mdr + 10] = 1.0f;
+            buttons2[mdr + 11] = 0.0f;
+            //
+            buttons2[mdr + 12] = -(MIN_X / 2) + (n + 1) * icon;
+            buttons2[mdr + 13] = (MIN_Y / 2) - (m + 1) * icon;
+            buttons2[mdr + 14] = 1.0f;
+            buttons2[mdr + 15] = 1.0f;
+            mdr += 16;
+        }
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_VERTS_GUI2]);
+    glBufferData(GL_ARRAY_BUFFER, no_x * no_y * 4 * 4 * sizeof (float), buttons2, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    free(buttons2);
+    PRINTGLERROR
+    /*
+        glGenFramebuffers(1, &FramebufferName);
+        glBindFramebuffer(GL_FRAMEBUFFER, FramebufferName);
+        PRINTGLERROR
+
+        GLint maxRenderbufferSize;
+        glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbufferSize);
+        DEBUG("GL_MAX_RENDERBUFFER_SIZE: %i\n", maxRenderbufferSize);
+        PRINTGLERROR
+
+        glGenTextures(1, &renderedTexture);
+        glBindTexture(GL_TEXTURE_2D, renderedTexture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 800, 480, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, NULL);
+        PRINTGLERROR
+
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, renderedTexture, 0);
+        GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE) {
+            PRINTF("Framebuffer object is not complete!\n");
+            exit(EXIT_FAILURE);
+        }*/
+
+    /*glGenRenderbuffers(1, &renderBuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, renderBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 800, 480);
+    PRINTGLERROR
+
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, renderBuffer);
+    PRINTGLERROR*/
+
+
+    PRINTGLERROR
+    //glBindTexture(GL_TEXTURE_2D, 0);
+    //glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    //glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    PRINTGLERROR
+
+    //renderGUITex(esContext);
+    PRINTGLERROR
+
     glViewport(0, -160, 800, 800);
-    //glViewport(0, 0, 800, 480);
     glClearColor(bkColor[0], bkColor[1], bkColor[2], 1.0f);
 
     esMatrixLoadIdentity(&perspective);
@@ -577,13 +750,13 @@ int Init(ESContext *esContext) {
     gui_mode = _2D_;
     posData->o_x = 0.0f;
     posData->o_y = 0.0f;
-
-
     PRINTGLERROR
+
     return GL_TRUE;
 }
 
 void printM4(ESMatrix *wg) {
+
     PRINTF("%f %f %f %f\n", wg->m[0][0], wg->m[0][1], wg->m[0][2], wg->m[0][3]);
     PRINTF("%f %f %f %f\n", wg->m[1][0], wg->m[1][1], wg->m[1][2], wg->m[1][3]);
     PRINTF("%f %f %f %f\n", wg->m[2][0], wg->m[2][1], wg->m[2][2], wg->m[2][3]);
@@ -605,6 +778,7 @@ void renderText(UserData *userData, char *str, GLfloat p_x, GLfloat p_y) {
     glBindBuffer(GL_ARRAY_BUFFER, userData->buffindex[BUFF_INDEX_TXT]);
 
     for (int p = 0; p < len; p++) {
+
         fgh[0] += A_O;
         fgh[4] += A_O;
         fgh[8] += A_O;
@@ -620,18 +794,21 @@ void renderText(UserData *userData, char *str, GLfloat p_x, GLfloat p_y) {
 }
 
 void renderFloat(UserData *userData, float zahl, GLfloat p_x, GLfloat p_y) {
+
     char str[16];
     snprintf(str, 16, "%f", zahl);
     renderText(userData, str, p_x, p_y);
 }
 
 void renderInt(UserData *userData, int zahl, GLfloat p_x, GLfloat p_y) {
+
     char str[16];
     snprintf(str, 16, "%d", zahl);
     renderText(userData, str, p_x, p_y);
 }
 
 void intro(ESContext *esContext) {
+
     UserData *userData = esContext->userData;
 
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -697,8 +874,8 @@ void Update(ESContext *esContext, float deltaTime) {
     }
 
     //pthread_mutex_lock(&mutex_asd);
-    posData->g[0] += deltaTime * posData->v_x / 3600.0f / posData->osmS;
-    posData->g[1] -= deltaTime * posData->v_y / 3600.0f / posData->osmS;
+    //posData->g[0] += deltaTime * posData->v_x / 3600.0f / posData->osmS;
+    //posData->g[1] -= deltaTime * posData->v_y / 3600.0f / posData->osmS;
 
     double g_x = posData->g[0] + posData->o_x;
     double g_y = posData->g[1] - posData->o_y;
@@ -822,6 +999,7 @@ void Update(ESContext *esContext, float deltaTime) {
 
     for (uint16_t m = 0; m < farbe_werder_len; m++) {
         for (uint16_t n = 0; n < (farbe_werder[m].len / 3); n++) {
+
             int c = (n % (sizeof (color) / sizeof (color[0]) / 3))*3;
 
             glUniform3f(userData->colorLocMap, color[c], color[c + 1], color[c + 2]);
@@ -876,6 +1054,8 @@ void Update(ESContext *esContext, float deltaTime) {
 
     //#ifdef __RASPI__
     // GUI
+
+
     glUseProgram(userData->programGUI);
     glActiveTexture(GL_TEXTURE0);
     glUniform1i(userData->samplerLocGui, 0);
@@ -890,6 +1070,12 @@ void Update(ESContext *esContext, float deltaTime) {
     glDrawArrays(GL_TRIANGLE_STRIP, 7, 4);
     glBindTexture(GL_TEXTURE_2D, gui_tex_index[4]);
     glDrawArrays(GL_TRIANGLE_STRIP, 11, 4);
+    glBindTexture(GL_TEXTURE_2D, gui_tex_index[5]);
+    glDrawArrays(GL_TRIANGLE_STRIP, 30, 4);
+
+    //
+    //glBindTexture(GL_TEXTURE_2D, renderedTexture);
+    //glDrawArrays(GL_TRIANGLE_STRIP, 34, 4);
 
     // Text
     //renderInt(userData, posData->obd_speed, -1.0f, 0.54f);
@@ -904,16 +1090,12 @@ void Update(ESContext *esContext, float deltaTime) {
     glUniform3f(userData->colorLocKreis, gps_status[0], gps_status[1], gps_status[2]);
     glDrawArrays(GL_TRIANGLE_STRIP, 15, 4);
     PRINTGLERROR
-            //#endif
 }
 
-void Button(int x, int y) {
+void Button(int x, int y, ESContext *esContext) {
+    //printf("%i %i\n", x, y);
 
     if (x > 9 && x < 50 && y > 432 && y < 470) {
-        //printf("##################\n##################\n");
-
-        //printf("%f %f %f\n", bkColor[0], bkColor[1], bkColor[2]);
-
         if (bkColor[0] == 0.0f && bkColor[1] == 0.0f && bkColor[2] == 0.0f) {
             bkColor [0] = 1.0f;
             bkColor [1] = 1.0f;
@@ -923,6 +1105,12 @@ void Button(int x, int y) {
             bkColor [1] = 0.0f;
             bkColor [2] = 0.0f;
         }
+#ifdef __RASPI__
+    } else if (x > 9 && x < 50 && y > 4 && y < 51) {
+        POS_T *posData = ((ESContext*) esContext)->posData;
+        posData->gps_file++;
+        initFile(posData->gps_file);
+#endif
 
     } else if (x > 700 && x < 740 && y > 430 && y < 480) {
         if (ORTHO < 18.0) {
@@ -932,6 +1120,7 @@ void Button(int x, int y) {
         }
     } else if (x > 756 && x < 800 && y > 430 && y < 480) {
         if (ORTHO > 1.0) {
+
             ORTHO -= 1.0f;
             esMatrixLoadIdentity(&perspective);
             esOrtho(&perspective, -ORTHO, ORTHO, -ORTHO, ORTHO, -50, 50);
@@ -941,7 +1130,8 @@ void Button(int x, int y) {
 
 void Key(ESContext *esContext, unsigned char a, int b, int c) {
     POS_T *posData = esContext->posData;
-    GPS_T *gpsData = esContext->gpsData;
+    //GPS_T *gpsData = esContext->gpsData;
+
     uint l = 0;
 
     //printf("%i\n", a);
@@ -1169,6 +1359,7 @@ int cmpfunc_farbe(const void * a, const void * b) {
 }
 
 int cmpfunc_id(const void * a, const void * b) {
+
     return (((T_V_E*) a)->id - ((T_V_E*) b)->id);
 }
 
@@ -1176,7 +1367,7 @@ T_IO io_eigenschaften[5];
 
 void initPOS(ESContext * esContext) {
     POS_T *posData = esContext->posData;
-    GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
+    //GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     io_eigenschaften[0].val = &posData->g[0];
     io_eigenschaften[0].len = sizeof (double);
@@ -1214,6 +1405,7 @@ void initPOS(ESContext * esContext) {
         fflush(eigenschaften);
     } else {
         for (int a = 0; a< sizeof (io_eigenschaften) / sizeof (T_IO); a++) {
+
             fread(io_eigenschaften[a].val, io_eigenschaften[a].len, 1, eigenschaften);
         }
         posData->gps_file++;
@@ -1539,6 +1731,7 @@ void * thread_foss(void *esContext) {
                     if (strncmp(posData->obf_dtc3, "0000", 4) != 0) {
                         gpio_lcd_send_byte(',', GPIO_HIGH);
                         for (uint_fast8_t a = 0; a < 4; a++) {
+
                             gpio_lcd_send_byte(posData->obf_dtc3[a], GPIO_HIGH);
                         }
                     }
@@ -1556,6 +1749,7 @@ void * thread_foss(void *esContext) {
 
 typedef struct {
     // Index in route
+
     int32_t index;
     // Höhe eines Punktes auf route[index]
     double hc;
@@ -1567,11 +1761,13 @@ typedef struct {
 } ROUTE_T;
 
 double tilex2long(double g) {
+
     return g / pow2Z * 360.0 - 180.0;
 }
 
 double tiley2lat(double g) {
     double n = M_PI - 2.0 * M_PI * g / pow2Z;
+
     return 180.0 / M_PI * atan(0.5 * (exp(n) - exp(-n)));
 }
 
@@ -1621,6 +1817,7 @@ int32_t getRouteSektor(ROUTE_T out[], double *g, double *V) {
                 }
          */
         if (hc < 1.0) {
+
             ret++;
             out[ret].index = n;
             out[ret].hc = hc;
@@ -1635,6 +1832,7 @@ int32_t getRouteSektor(ROUTE_T out[], double *g, double *V) {
 }
 
 void getRouteSektorPunkt(int32_t in, double *g, double *out) {
+
     double A[2] = {route[in - 1].g_x, route[in - 1].g_y};
     double B[2] = {route[in].g_x, route[in].g_y};
 
@@ -1653,7 +1851,7 @@ void * thread_ubongo(void *esContext) {
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
     ROUTE_T ret_route[100];
-    struct timespec spec0, spec1;
+    //struct timespec spec0, spec1;
 
     double old_g[2];
     sleep(2);
@@ -1692,6 +1890,7 @@ void * thread_ubongo(void *esContext) {
                 memcpy(posData->g, gpsData->g, 2 * sizeof (double));
                 //memcpy(posData->a, gpsData->g, 2 * sizeof (double));
             } else {
+
                 double X[2];
                 getRouteSektorPunkt(ret_route[ret2].index, gpsData->g, X);
 
@@ -1749,7 +1948,10 @@ void * thread_onkyo(void *esContext) {
     POS_T *posData = ((ESContext*) esContext)->posData;
     GPS_T *gpsData = ((ESContext*) esContext)->gpsData;
 
-    struct timespec t1, t2;
+    struct timespec t1;
+#ifdef __RASPI__
+    struct timespec t2;
+#endif
 #ifdef __GPS__
     int gpsd_init = -1;
 #endif
@@ -1781,13 +1983,12 @@ void * thread_onkyo(void *esContext) {
     markierung.g = 0.0f;
     markierung.b = 1.0f;
 
-    printf("io_gps:");
+    DEBUG("io_gps:");
     for (int a = 0; a<sizeof (io_gio) / sizeof (T_IO); a++) {
         max_len += io_gio[a].len;
-        printf(" %zu", io_gio[a].len);
+        DEBUG(" %zu", io_gio[a].len);
     }
-    printf(" = %zibyte\n", max_len);
-    printf("\n");
+    DEBUG(" = %zibyte\n\n", max_len);
 
     sleep(2);
     PRINTF("\rONKYO gestartet\n");
@@ -1845,7 +2046,7 @@ void * thread_onkyo(void *esContext) {
                 memcpy(posData->g, gpsData->g, 2 * sizeof (double));
             }
 
-            //printf("%u\n", counter);
+            printf("%u\n", counter);
             //printf("%u [%f,%f] [%f,%f]\n", deltatime, gpsData->g[0], gpsData->g[1], gpsData->V[0], gpsData->V[1]);
             counter++;
             usleep(deltatime * 1000);
@@ -1859,6 +2060,7 @@ void * thread_onkyo(void *esContext) {
                 gpsData->angle2 = getDegrees(gpsData->latitude, gpsData->longitude, old_latitude, old_longitude);
                 stamp = t2.tv_sec;
                 for (int a = 0; a<sizeof (io_gio) / sizeof (T_IO); a++) {
+
                     fwrite(io_gio[a].val, io_gio[a].len, 1, gps_out);
                 }
                 fflush(gps_out);
@@ -1957,26 +2159,13 @@ void * thread_deta_lvl1(void *esContext) {
     sleep(1);
     PRINTF("\rdeta_lvl1 gestartet\n");
 
-#ifdef __DEBUG__
-    struct timespec spec0, spec1;
-#endif
-
     while (1) {
-#ifdef __DEBUG__
-
-        clock_gettime(CLOCK_MONOTONIC, &spec0);
-#endif
-        run_deta_lvl1(posData->g[0] + posData->o_x, posData->g[1] - posData->o_y);
-
-#ifdef __DEBUG__
-        printf("deta_lvl2: ");
-        TM(spec0, spec1)
-#endif
+        TIME(run_deta_lvl1(posData->g[0] + posData->o_x, posData->g[1] - posData->o_y), "deta_lvl1");
 
 #ifdef __RASPI__
-                usleep(10000000);
+        usleep(10000000);
 #else
-                usleep(1000000);
+        usleep(2000000);
 #endif
     }
     return NULL;
@@ -2018,26 +2207,14 @@ void * thread_deta_lvl2(void *esContext) {
     sleep(1);
     PRINTF("\rdeta_lvl2 gestartet\n");
 
-#ifdef __DEBUG__
-    struct timespec spec0, spec1;
-#endif
-
     while (1) {
-#ifdef __DEBUG__
 
-        clock_gettime(CLOCK_MONOTONIC, &spec0);
-#endif
-        run_deta_lvl2(posData->g[0] + posData->o_x, posData->g[1] - posData->o_y);
-
-#ifdef __DEBUG__
-        printf("deta_lvl2: ");
-        TM(spec0, spec1)
-#endif
+        TIME(run_deta_lvl2(posData->g[0] + posData->o_x, posData->g[1] - posData->o_y), "deta_lvl2");
 
 #ifdef __RASPI__
-                usleep(10000000);
+        usleep(10000000);
 #else
-                usleep(1000000);
+        usleep(2000000);
 #endif
     }
     return NULL;
@@ -2090,27 +2267,13 @@ void * thread_deta_lvl3(void *esContext) {
     sleep(1);
     PRINTF("\rdeta_lvl3 gestartet\n");
 
-#ifdef __DEBUG__
-    struct timespec spec0, spec1;
-#endif
-
-
     while (1) {
-#ifdef __DEBUG__
-
-        clock_gettime(CLOCK_MONOTONIC, &spec0);
-#endif
-        run_deta_lvl3(posData->g[0] + posData->o_x, posData->g[1] - posData->o_y);
-
-#ifdef __DEBUG__
-        printf("deta_lvl3: ");
-        TM(spec0, spec1)
-#endif
+        TIME(run_deta_lvl3(posData->g[0] + posData->o_x, posData->g[1] - posData->o_y), "deta_lvl3");
 
 #ifdef __RASPI__
-                usleep(3000000);
+        usleep(3000000);
 #else
-                usleep(1000000);
+        usleep(2000000);
 #endif
     }
 
@@ -2149,7 +2312,7 @@ void * thread_jolla(void *esContext) {
                 bl_write(BL_ON);
             }
 #endif
-            Button(rawX, rawY);
+            Button(rawX, rawY, esContext);
         }
     }
 
@@ -2197,10 +2360,17 @@ double getDegrees(double lat1, double lon1, double lat2, double lon2) {
 }
 
 void * thread_pinto(void *esContext) {
+#ifdef __RASPI__
     POS_T *posData = ((ESContext*) esContext)->posData;
 
     struct timespec t1;
     uint32_t stamp;
+
+    T_IO io_sensor[] = {
+        {&stamp, sizeof (stamp)},
+        {&posData->obd_volt, sizeof (posData->obd_volt)}
+    };
+#endif
 
 #ifdef __OBD__    
     // für obd_volt
@@ -2231,11 +2401,6 @@ void * thread_pinto(void *esContext) {
 #ifdef __I2C__
     short i2c_x, i2c_y, i2c_z;
 #endif
-
-    T_IO io_sensor[] = {
-        {&stamp, sizeof (stamp)},
-        {&posData->obd_volt, sizeof (posData->obd_volt)}
-    };
 
     PRINTF("\rPINTO gestartet\n");
 
@@ -2366,6 +2531,7 @@ void * thread_pinto(void *esContext) {
         clock_gettime(CLOCK_MONOTONIC, &t1);
         stamp = t1.tv_sec;
         for (int a = 0; a<sizeof (io_sensor) / sizeof (T_IO); a++) {
+
             fwrite(io_sensor[a].val, io_sensor[a].len, 1, sensor_out);
         }
         fflush(sensor_out);
@@ -2384,24 +2550,21 @@ void thread_render(ESContext * esContext) {
     uint_fast32_t us = 10000;
 
     gettimeofday(&t1, &tz);
-#ifdef __TM__
+
     struct timespec spec1, spec2;
     uint_fast16_t ms_min = UINT16_MAX, ms_max = 0, ms, ms_avg = 0;
-#endif
 
     while (userInterrupt(esContext) == GL_FALSE) {
         gettimeofday(&t2, &tz);
         deltatime = (float) (t2.tv_sec - t1.tv_sec + (t2.tv_usec - t1.tv_usec) * 1e-6) * 1000;
         t1 = t2;
-#ifdef __TM__
+
         clock_gettime(CLOCK_MONOTONIC, &spec1);
-#endif   
 
         glClearColor(bkColor[0], bkColor[1], bkColor[2], 1.0f);
         Update(esContext, deltatime);
         eglSwapBuffers(esContext->eglDisplay, esContext->eglSurface);
 
-#ifdef __TM__
         clock_gettime(CLOCK_MONOTONIC, &spec2);
 
         ms = (spec2.tv_sec - spec1.tv_sec) * 1000 + (spec2.tv_nsec - spec1.tv_nsec) * 1e-6;
@@ -2416,8 +2579,8 @@ void thread_render(ESContext * esContext) {
         frames++;
 
         if (totaltime > 4.0f) {
-
-            //PRINTF("\rFPS: %3.1f FRAMETIME: %i %4.1f %i  us: %u\n", frames / totaltime, ms_min, (float) ms_avg / frames, ms_max, us);
+            //renderGUITex(esContext);
+            PRINTF("\rFPS: %3.1f FRAMETIME: %u %4.1f %u  us: %zu\n", frames / totaltime, (unsigned int) ms_min, (float) ms_avg / frames, (unsigned int) ms_max, us);
 
             if ((frames / totaltime) > 30.0f) {
                 us += 1000;
@@ -2434,7 +2597,6 @@ void thread_render(ESContext * esContext) {
             ms_max = 0;
 
         }
-#endif
         usleep(us);
     }
 }
@@ -2622,22 +2784,25 @@ void ShutDown(int signum) {
 
 void initFile(uint16_t gps_file) {
     char filename[100];
-
     snprintf(filename, sizeof (filename) / sizeof (filename[0]), "%s/sit2d_%i.gps", HOME, gps_file);
-    
-    fclose(gps_out);
+    if (gps_out != NULL) {
+        fclose(gps_out);
+    }
     gps_out = fopen(filename, "wb");
     //gps_out = open(filename, O_WRONLY | O_CREAT | O_TRUNC | O_SYNC | __O_DIRECT);
     assert(gps_out != NULL);
     snprintf(filename, sizeof (filename) / sizeof (filename[0]), "%s/sit2d_%i.obd", HOME, gps_file);
-    fclose(sensor_out);
+    if (sensor_out != NULL) {
+        fclose(sensor_out);
+    }
     sensor_out = fopen(filename, "wb");
     assert(gps_out != NULL);
-
     fclose(sout);
     snprintf(filename, sizeof (filename) / sizeof (filename[0]), "%s/sit2d_%i.debug", HOME, gps_file);
     sout = fopen(filename, "wb");
     assert(sout != NULL);
+
+    PRINTF("sit2d_%i geöffnet.\n", gps_file);
 }
 
 int main(int argc, char *argv[]) {
@@ -2652,13 +2817,6 @@ int main(int argc, char *argv[]) {
     markierung.len = -1;
 
     char filename[100]/*, buffer[80]*/;
-
-    pthread_t thread_id1, thread_id2, thread_id3, thread_id4, thread_id5, thread_id6, thread_id7, thread_id8;
-    pthread_mutex_init(&m_pinto, NULL);
-    pthread_mutex_init(&mutex_deto_lvl1, NULL);
-    pthread_mutex_init(&mutex_deto_lvl2, NULL);
-    pthread_mutex_init(&mutex_deto_lvl3, NULL);
-    pthread_mutex_init(&mutex_asd, NULL);
 
     signal(SIGINT, ShutDown);
     setvbuf(stdout, (char *) NULL, _IONBF, 0);
@@ -2702,8 +2860,8 @@ int main(int argc, char *argv[]) {
         } else {
             PRINTF("%s nicht gefunden.\n", filename);
         }
-#define SEEK 1300
-        fseek(gps_in, 53 * SEEK, SEEK_SET);
+#define SEEK 1000
+        fseek(gps_in, 58 * SEEK, SEEK_SET);
         fseek(sensor_in, 9 * SEEK, SEEK_SET);
 
     } else {
@@ -2711,6 +2869,7 @@ int main(int argc, char *argv[]) {
         initFile(posData.gps_file);
 #endif
     }
+
     assert(esCreateWindow(&esContext, "SiT2D", userData.width, userData.height, ES_WINDOW_RGB) == GL_TRUE);
 
 #define SZ 4096
@@ -2729,43 +2888,50 @@ int main(int argc, char *argv[]) {
     menu_tex.buffer = load_TGA(&menu_tex.width, &menu_tex.height, HOME "RES/menu.tga");
     tex_zahlen.buffer = load_TGA(&tex_zahlen.width, &tex_zahlen.height, HOME "RES/ascii.tga");
     night_tex.buffer = load_TGA(&night_tex.width, &night_tex.height, HOME "RES/night.tga");
+    new_tex.buffer = load_TGA(&new_tex.width, &new_tex.height, HOME "RES/new.tga");
 
-    assert(Init(&esContext));
+    assert(init(&esContext));
     //intro(&esContext);
 
+
+    int thread_status[10];
+    memset(thread_status, 255, sizeof (thread_status));
+    pthread_t thread_id[10];
+
+    pthread_mutex_init(&m_pinto, NULL);
+    pthread_mutex_init(&mutex_deto_lvl1, NULL);
+    pthread_mutex_init(&mutex_deto_lvl2, NULL);
+    pthread_mutex_init(&mutex_deto_lvl3, NULL);
+    pthread_mutex_init(&mutex_asd, NULL);
 
 #ifndef __RASPI__
     esContext.keyFunc = Key;
     esContext.buttonFunc = Button;
 #else
-    pthread_create(&thread_id1, NULL, &thread_foss, (void*) &esContext);
-    pthread_create(&thread_id7, NULL, &thread_jolla, (void*) &esContext);
-    pthread_create(&thread_id2, NULL, &thread_pinto, (void*) &esContext);
-    pthread_setname_np(thread_id2, "meins_pinto");
+    thread_status[1] = pthread_create(&thread_id[1], NULL, &thread_foss, (void*) &esContext);
+    thread_status[7] = pthread_create(&thread_id[7], NULL, &thread_jolla, (void*) &esContext);
+    thread_status[2] = pthread_create(&thread_id[2], NULL, &thread_pinto, (void*) &esContext);
+    pthread_setname_np(thread_id[2], "meins_pinto");
 #endif
 
-    pthread_create(&thread_id3, NULL, &thread_deta_lvl1, (void*) &esContext);
-    pthread_setname_np(thread_id3, "meins_deta_lvl1");
-    pthread_create(&thread_id4, NULL, &thread_deta_lvl2, (void*) &esContext);
-    pthread_setname_np(thread_id4, "meins_deta_lvl2");
-    pthread_create(&thread_id5, NULL, &thread_deta_lvl3, (void*) &esContext);
-    pthread_setname_np(thread_id5, "meins_deta_lvl3");
-    pthread_create(&thread_id6, NULL, &thread_ubongo, (void*) &esContext);
-    pthread_setname_np(thread_id6, "meins_ubongo");
-    pthread_create(&thread_id8, NULL, &thread_onkyo, (void*) &esContext);
-    pthread_setname_np(thread_id8, "meins_onkyo");
+    thread_status[3] = pthread_create(&thread_id[3], NULL, &thread_deta_lvl1, (void*) &esContext);
+    pthread_setname_np(thread_id[3], "meins_deta_lvl1");
+    thread_status[4] = pthread_create(&thread_id[4], NULL, &thread_deta_lvl2, (void*) &esContext);
+    pthread_setname_np(thread_id[4], "meins_deta_lvl2");
+    thread_status[5] = pthread_create(&thread_id[5], NULL, &thread_deta_lvl3, (void*) &esContext);
+    pthread_setname_np(thread_id[5], "meins_deta_lvl3");
+    thread_status[6] = pthread_create(&thread_id[6], NULL, &thread_ubongo, (void*) &esContext);
+    pthread_setname_np(thread_id[6], "meins_ubongo");
+    thread_status[8] = pthread_create(&thread_id[8], NULL, &thread_onkyo, (void*) &esContext);
+    pthread_setname_np(thread_id[8], "meins_onkyo");
 
     thread_render(&esContext);
 
-    pthread_join(thread_id1, NULL);
-    pthread_join(thread_id2, NULL);
-    pthread_join(thread_id3, NULL);
-    pthread_join(thread_id4, NULL);
-    pthread_join(thread_id5, NULL);
-    pthread_join(thread_id6, NULL);
-    pthread_join(thread_id7, NULL);
-    pthread_join(thread_id8, NULL);
-
+    for (uint_fast8_t n = 0; n<sizeof (thread_status) / sizeof (thread_status[0]); n++) {
+        if (thread_status[n] == 0) {
+            pthread_join(thread_id[n], NULL);
+        }
+    }
     //ShutDown(&esContext);
 
     return (EXIT_SUCCESS);
