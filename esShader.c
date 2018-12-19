@@ -86,7 +86,7 @@ GLuint ESUTIL_API esLoadShader(GLenum type, const char *shaderSrc) {
 /// \return A new program object linked with the vertex/fragment shader pair, 0 on failure
 //
 
-GLuint ESUTIL_API esLoadProgram(const char *vertShaderSrc, const char *fragShaderSrc) {
+GLuint ESUTIL_API esLoadProgram(const char *name, const char *vertShaderSrc, const char *fragShaderSrc) {
     GLuint vertexShader;
     GLuint fragmentShader;
     GLuint programObject;
@@ -94,11 +94,14 @@ GLuint ESUTIL_API esLoadProgram(const char *vertShaderSrc, const char *fragShade
 
     // Load the vertex/fragment shaders
     vertexShader = esLoadShader(GL_VERTEX_SHADER, vertShaderSrc);
-    if (vertexShader == 0)
+    if (vertexShader == 0) {
+        printf("GL_VERTEX_SHADER: %s\n", name);
         return 0;
+    }
 
     fragmentShader = esLoadShader(GL_FRAGMENT_SHADER, fragShaderSrc);
     if (fragmentShader == 0) {
+        printf("GL_FRAGMENT_SHADER: %s\n", name);
         glDeleteShader(vertexShader);
         return 0;
     }
@@ -127,7 +130,7 @@ GLuint ESUTIL_API esLoadProgram(const char *vertShaderSrc, const char *fragShade
             char* infoLog = malloc(sizeof (char) * infoLen);
 
             glGetProgramInfoLog(programObject, infoLen, NULL, infoLog);
-            esLogMessage("Error linking program:\n%s\n", infoLog);
+            esLogMessage("%s: Error linking program:\n%s\n", name, infoLog);
 
             free(infoLog);
         }

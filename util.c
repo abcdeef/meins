@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "util.h"
+#include <inttypes.h>
 
 #define EXIST F_OK
 
@@ -32,49 +33,51 @@ double pf32(int32_t value, int8_t Q) {
     return (double) value / (double) (Q > 0 ? (1 << Q) : (1 >> (-Q)));
 }
 
-/*static size_t write_data(void *ptr, size_t size, size_t nmemb, void *stream) {
-        size_t written = fwrite(ptr, size, nmemb, (FILE *) stream);
-        return written;
-}*/
-
-/*
-void abort_(const char * s, ...) {
-        va_list args;
-        va_start(args, s);
-        vfprintf(stderr, s, args);
-        fprintf(stderr, "\n");
-        va_end(args);
-        abort();
-}*/
-
-void printBin(unsigned char *CH) {
-    unsigned char Mask = 0x01;
-    unsigned char P2_B2[8];
-    int n = 7;
+/* 1 Byte */
+void printBin(uint8_t *CH) {
+    uint8_t Mask = 0x01;
+    uint8_t P2_B2[8];
+    uint8_t n = 7;
     do {
         P2_B2[n--] = *CH & Mask ? 1 : 0;
     } while (Mask <<= 1);
     for (n = 0; n < 8; n++)
-        printf("%i", P2_B2[n]);
-    printf("\n");
+        printf("%hhu", P2_B2[n]);
+    printf(" %u\n", *CH);
 }
 
-void printBin2(unsigned short *CH) {
-    unsigned short Mask = 1;
-    unsigned char P2_B2[16];
-    int n = 15;
+/* 2 Byte */
+void printBin2(uint16_t *CH) {
+    uint16_t Mask = 1;
+    uint8_t P2_B2[16];
+    uint8_t n = 15;
     do {
         P2_B2[n--] = *CH & Mask ? 1 : 0;
     } while (Mask <<= 1);
     for (n = 0; n < 16; n++)
-        printf("%i", P2_B2[n]);
-    printf("\n");
+        printf("%hhu", P2_B2[n]);
+    printf(" %u\n", *CH);
+}
+
+/* 4 Byte */
+void printBin4(uint32_t *CH) {
+    uint32_t Mask = 1;
+    uint8_t P2_B2[32];
+    uint8_t n = 31;
+    do {
+        P2_B2[n--] = *CH & Mask ? 1 : 0;
+    } while (Mask <<= 1);
+
+    for (n = 0; n < 32; n++)
+        printf("%hhu", P2_B2[n]);
+
+    printf(" %u\n", *CH);
 }
 
 /*
  * Delay (warten), Zeitangabe in Millisekunden
  */
-int delay(unsigned long millis) {
+int meins_delay(unsigned long millis) {
     struct timespec ts;
 
     ts.tv_sec = millis / 1000;

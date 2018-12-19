@@ -147,9 +147,9 @@ EGLBoolean WinCreate(ESContext *esContext, const char *title) {
 
 GLboolean userInterrupt(ESContext *esContext) {
     XEvent xev;
-    KeySym key;
+    //KeySym key;
     GLboolean userinterrupt = GL_FALSE;
-    char text;
+    //char text;
 
     // Pump all messages from X server. Keypresses are directed to keyfunc (if defined)
     while (XPending(x_display)) {

@@ -774,7 +774,7 @@ void gps_open(int *uart0_filestream, char *uart_dev) {
     *uart0_filestream = open(uart_dev, O_RDONLY | O_NOCTTY | O_NDELAY);
 
     if (*uart0_filestream == -1) {
-        printf("Error - Unable to open UART.\n");
+        printf("Error - Unable to open GPS.\n");
         return;
     }
 
@@ -799,8 +799,8 @@ void gps_read(int *uart0_filestream, GPS_T *data) {
     } else if (rx_length > 0) {
         rx_asd += rx_length;
 
-        char *e = &rx_buffer[0];
-        char *s = &rx_buffer[0];
+        char *e = (char*) &rx_buffer[0];
+        char *s = (char*) &rx_buffer[0];
 
         while (e != NULL) {
             e = strchr(e, 13);

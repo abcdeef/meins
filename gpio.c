@@ -54,7 +54,7 @@ int bl_write(char *value) {
     return (0);
 }
 
-void gpio_init() {
+int gpio_init() {
     int mem_fd;
 
     if ((mem_fd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
@@ -79,6 +79,8 @@ void gpio_init() {
     }
 
     gpio = (volatile unsigned *) gpio_map;
+    
+    return 1;
 }
 
 #ifdef __RASPI__
@@ -195,7 +197,7 @@ void gpio_get_button(unsigned int *button) {
 //}
 #else
 
-void gpio_get_button(unsigned int *button) {
+uint32_t gpio_get_button(void) {
     //*button = GET_GPIO(18);
 }
 
